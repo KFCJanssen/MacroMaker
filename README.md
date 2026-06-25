@@ -1,5 +1,4 @@
-# MacroMaker
-# Windows Desktop Automation Tool 🚀
+# MacroMaker - Windows Desktop Automation Tool 🚀
 
 A modular, lightweight Python application designed to automate repetitive desktop tasks. This project features a high-performance **Auto-Clicker** and a customizable **Macro Runner**, all controlled seamlessly via global **Hotkeys**. 
 
