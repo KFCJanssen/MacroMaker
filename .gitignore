@@ -1,0 +1,11 @@
+# PyInstaller outputs
+build/
+dist/
+*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local macros saved by the app
+macros.json
