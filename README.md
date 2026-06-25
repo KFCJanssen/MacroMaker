@@ -1,56 +1,51 @@
-# MacroMaker | Windows Desktop Automation Tool 🚀
+# Macro Maker — Desktop
 
-A modular, lightweight Python application designed to automate repetitive desktop tasks. This project features a high-performance **Auto-Clicker** and a customizable **Macro Runner**, all controlled seamlessly via global **Hotkeys**. 
+Auto clicker & macro tool with global F-key hotkeys.
 
-It comes pre-packaged with convenient Windows batch scripts to install dependencies locally or compile the entire project into a standalone `.exe` file with a single click (also found in dits file).
+## Setup (one time)
 
----
+```bash
+pip install -r requirements.txt
+```
 
-## ✨ Features
+> **macOS only:** Go to System Settings → Privacy & Security → Accessibility and add your Terminal (or Python) to the allowed list. Same for Screen Recording if you use the position picker.
 
-* **Advanced Auto-Clicker:** High-frequency, reliable automated clicking.
-* **Macro Runner:** Record and replay automated keyboard and mouse sequences.
-* **Global Hotkeys:** Start, stop, or toggle features instantly from anywhere in Windows without needing to focus on the application window.
-* **One-Click Setup:** Zero-friction installation using automated batch scripts.
-* **Portable Executable:** Ready to be compiled into a standalone Windows `.exe` using PyInstaller.
+> **Linux only:** `pip install python3-xlib` may also be needed.
 
----
+## Run
 
-## 📂 Project Structure
+```bash
+python main.py
+```
 
-* **`main.py`** – The main entry point of the application.
-* **`auto_clicker.py`** – Core logic governing mouse clicking operations.
-* **`macro_runner.py`** – Core logic handling macro sequences and automation.
-* **`hotkeys.py`** – Manages global keyboard shortcuts for toggling actions.
-* **`requirements.txt`** – Lists necessary Python dependencies (e.g., `pynput`, `pyautogui`).
-* **`install_and_run.bat`** – Automates setting up your Python environment and launching the app.
-* **`build_exe.bat`** – Compiles the Python scripts into a standalone Windows executable (`.exe`).
+## Features
 
----
+### Auto Clicker
+- Set click interval (ms) with presets or custom value
+- **Follow cursor** — clicks wherever your mouse is
+- **Fixed position** — click 📍 Pick then click anywhere on screen to capture coordinates
+- Left / Right / Middle mouse button
+- Repeat forever or stop after N clicks
+- **Toggle hotkey** (default F6) — works while you're in any other window
 
-## 🚀 Getting Started
+### Macro Maker
+- Build sequences of: Mouse Click, Mouse Move, Key Press, Delay, Scroll
+- 📍 Pick position by clicking anywhere on screen for any step
+- Reorder steps with ↑ ↓ buttons, double-click to edit
+- Repeat: Once / N times / Forever
+- **Start hotkey** (default F7) and **Stop hotkey** (default F8) — work globally
+- 💾 Save macro to `macros.json` and 📂 reload it later
 
-### Option 1: Run via Python (For Developers)
-If you want to run the application using Python on your machine:
-1. Clone this repository to your local machine.
-2. Double-click **`install_and_run.bat`**. This script will automatically install the required dependencies from `requirements.txt` and boot up the app.
+## Emergency Stop
 
-### Option 2: Build the Standalone Executable (`.exe`)
-If you want to distribute the app or run it without needing Python installed:
-1. Double-click **`build_exe.bat`**.
-2. Once the compilation finishes, look for the newly created `dist/` folder.
-3. Your standalone application will be waiting inside as a single `.exe` file!
+Move your mouse to the **top-left corner of your screen** — pyautogui's failsafe will immediately halt all automation.
 
----
+## Hotkey Reference (defaults)
 
-## 🛠️ Configuration & Customization
+| Hotkey | Action |
+|--------|--------|
+| F6 | Toggle Auto Clicker on/off |
+| F7 | Start Macro |
+| F8 | Stop Macro |
 
-You can tweak the default settings, click rates, and macro configurations directly within the source files:
-* Open `hotkeys.py` to change the default keybinds for triggering the clicker or macro runner.
-* Open `auto_clicker.py` or `macro_runner.py` to adjust specific execution delays or click intervals.
-
----
-
-## 📝 License
-
-This project is open-source and available under the [MIT License](LICENSE).
+All hotkeys are configurable from the app UI.
