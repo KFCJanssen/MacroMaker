@@ -9,6 +9,8 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 import json
 import os
+import sys
+import platform
 
 from auto_clicker import AutoClicker
 from macro_runner import MacroRunner, MacroStep
@@ -38,7 +40,21 @@ FONT_S     = ("Segoe UI", 11)
 FONT_XS    = ("Segoe UI", 10)
 FONT_SEC   = ("Segoe UI", 10, "bold")
 
-SAVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macros.json")
+def _get_save_dir() -> str:
+    """Return a stable, always-writable directory for app data."""
+    if platform.system() == "Windows":
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            d = os.path.join(appdata, "MacroMaker")
+            os.makedirs(d, exist_ok=True)
+            return d
+    # macOS / Linux fallback
+    d = os.path.join(os.path.expanduser("~"), ".macromaker")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+SAVE_DIR  = _get_save_dir()
+SAVE_FILE = os.path.join(SAVE_DIR, "macros.json")
 
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
@@ -583,16 +599,38 @@ class LoadMacroDialog(ctk.CTkToplevel):
                      text_color=FG).pack(anchor="w", padx=20, pady=(16, 4))
         ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(fill="x", padx=20)
 
+        # ── Buttons packed FIRST at the bottom so they are never cropped ────
+        ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(
+            fill="x", padx=20, side="bottom")
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(8, 16), side="bottom")
+
+        ctk.CTkButton(btn_row, text="Cancel", width=90, font=FONT_M,
+                      fg_color=CARD, hover_color=HOVER,
+                      command=self.destroy).pack(side="left")
+        self._del_btn = ctk.CTkButton(btn_row, text="🗑 Delete", width=90,
+                                       font=FONT_M, fg_color=CARD,
+                                       hover_color=DANGER, text_color=DANGER,
+                                       state="disabled",
+                                       command=self._delete)
+        self._del_btn.pack(side="left", padx=(8, 0))
+        self._load_btn = ctk.CTkButton(btn_row, text="✔  Load Selected Macro",
+                                        font=FONT_M, fg_color=PRIMARY,
+                                        hover_color="#006CBE",
+                                        state="disabled",
+                                        command=self._load)
+        self._load_btn.pack(side="right")
+
+        # ── Body (fills remaining space between header and buttons) ──────────
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=20, pady=10)
-        body.columnconfigure(0, weight=2)
-        body.columnconfigure(1, weight=3)
-        body.rowconfigure(0, weight=1)
 
-        # ── Left: name list ──────────────────────────────────────────────────
+        # Left panel — fixed 190 px wide, full height
         left = ctk.CTkFrame(body, fg_color=CARD, corner_radius=6,
-                            border_width=1, border_color=BORDER)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+                            border_width=1, border_color=BORDER, width=190)
+        left.pack(side="left", fill="y", padx=(0, 8))
+        left.pack_propagate(False)
+
         ctk.CTkLabel(left, text="SAVED MACROS", font=FONT_SEC,
                      text_color=PRIMARY).pack(anchor="w", padx=10, pady=(8, 4))
 
@@ -609,51 +647,35 @@ class LoadMacroDialog(ctk.CTkToplevel):
         for name in sorted(self._macros.keys()):
             self._listbox.insert("end", f"  {name}")
 
-        # ── Right: preview ───────────────────────────────────────────────────
+        # Right panel — takes all remaining width
         right = ctk.CTkFrame(body, fg_color=CARD, corner_radius=6,
                              border_width=1, border_color=BORDER)
-        right.grid(row=0, column=1, sticky="nsew")
+        right.pack(side="left", fill="both", expand=True)
+
         ctk.CTkLabel(right, text="PREVIEW", font=FONT_SEC,
                      text_color=PRIMARY).pack(anchor="w", padx=10, pady=(8, 4))
 
+        preview_wrap = ctk.CTkFrame(right, fg_color="transparent")
+        preview_wrap.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        scroll = tk.Scrollbar(preview_wrap, orient="vertical")
+        scroll.pack(side="right", fill="y")
+
         self._preview = tk.Text(
-            right,
+            preview_wrap,
             bg=CARD, fg=FG,
             font=("Courier New", 10),
             relief="flat", bd=0, highlightthickness=0,
             state="disabled", wrap="none",
+            yscrollcommand=scroll.set,
         )
-        scroll = tk.Scrollbar(right, orient="vertical",
-                              command=self._preview.yview)
-        self._preview.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y", pady=(0, 6), padx=(0, 4))
-        self._preview.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        scroll.configure(command=self._preview.yview)
+        self._preview.pack(fill="both", expand=True)
 
         self._placeholder = ctk.CTkLabel(right,
                                           text="← Select a macro to preview",
                                           font=FONT_S, text_color=MUTED)
         self._placeholder.place(relx=0.5, rely=0.5, anchor="center")
-
-        # ── Buttons ──────────────────────────────────────────────────────────
-        ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(fill="x", padx=20)
-        btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.pack(fill="x", padx=20, pady=(8, 16))
-
-        ctk.CTkButton(btn_row, text="Cancel", width=90, font=FONT_M,
-                      fg_color=CARD, hover_color=HOVER,
-                      command=self.destroy).pack(side="left")
-        self._del_btn = ctk.CTkButton(btn_row, text="🗑 Delete", width=90,
-                                       font=FONT_M, fg_color=CARD,
-                                       hover_color=DANGER, text_color=DANGER,
-                                       state="disabled",
-                                       command=self._delete)
-        self._del_btn.pack(side="left", padx=(8, 0))
-        self._load_btn = ctk.CTkButton(btn_row, text="📂 Load Macro",
-                                        font=FONT_M, fg_color=PRIMARY,
-                                        hover_color="#006CBE",
-                                        state="disabled",
-                                        command=self._load)
-        self._load_btn.pack(side="right")
 
     def _on_select(self, _=None):
         sel = self._listbox.curselection()
@@ -1144,8 +1166,8 @@ class App(ctk.CTk):
         footer.pack(fill="x", side="bottom")
         footer.pack_propagate(False)
         ctk.CTkLabel(footer,
-                     text="Move mouse to top-left corner for emergency stop  |  "
-                          "macros.json auto-saves in app folder",
+                     text=f"Emergency stop: move mouse to top-left  |  "
+                          f"Macros saved to: {SAVE_FILE}",
                      font=("Segoe UI", 9), text_color=MUTED).pack(pady=6)
 
         self._select_nav("Auto Clicker")
