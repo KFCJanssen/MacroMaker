@@ -6,7 +6,7 @@ Requires: pip install customtkinter pyautogui pynput
 
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 import json
 import os
 
@@ -38,7 +38,7 @@ FONT_S     = ("Segoe UI", 11)
 FONT_XS    = ("Segoe UI", 10)
 FONT_SEC   = ("Segoe UI", 10, "bold")
 
-SAVE_FILE = os.path.join(os.path.dirname(__file__), "macros.json")
+SAVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macros.json")
 
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
@@ -560,6 +560,155 @@ class AddStepDialog(ctk.CTkToplevel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  LOAD MACRO DIALOG
+# ─────────────────────────────────────────────────────────────────────────────
+class LoadMacroDialog(ctk.CTkToplevel):
+    """Browse saved macros, see a step preview, then load or delete one."""
+
+    def __init__(self, master, all_macros: dict, callback, **kwargs):
+        super().__init__(master, **kwargs)
+        self.title("Load Macro")
+        self.geometry("640x460")
+        self.resizable(False, False)
+        self.configure(fg_color=BG)
+        self.grab_set()
+        self._macros   = all_macros        # {name: [step_dicts]}
+        self._callback = callback          # called with chosen name or None
+        self._selected = None
+        self._build()
+
+    def _build(self):
+        # ── Header ──────────────────────────────────────────────────────────
+        ctk.CTkLabel(self, text="Select a macro to load", font=FONT_H,
+                     text_color=FG).pack(anchor="w", padx=20, pady=(16, 4))
+        ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(fill="x", padx=20)
+
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=20, pady=10)
+        body.columnconfigure(0, weight=2)
+        body.columnconfigure(1, weight=3)
+        body.rowconfigure(0, weight=1)
+
+        # ── Left: name list ──────────────────────────────────────────────────
+        left = ctk.CTkFrame(body, fg_color=CARD, corner_radius=6,
+                            border_width=1, border_color=BORDER)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        ctk.CTkLabel(left, text="SAVED MACROS", font=FONT_SEC,
+                     text_color=PRIMARY).pack(anchor="w", padx=10, pady=(8, 4))
+
+        self._listbox = tk.Listbox(
+            left,
+            bg=CARD, fg=FG,
+            selectbackground=PRIMARY, selectforeground=FG,
+            font=("Segoe UI", 11),
+            relief="flat", bd=0, highlightthickness=0, activestyle="none",
+        )
+        self._listbox.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self._listbox.bind("<<ListboxSelect>>", self._on_select)
+
+        for name in sorted(self._macros.keys()):
+            self._listbox.insert("end", f"  {name}")
+
+        # ── Right: preview ───────────────────────────────────────────────────
+        right = ctk.CTkFrame(body, fg_color=CARD, corner_radius=6,
+                             border_width=1, border_color=BORDER)
+        right.grid(row=0, column=1, sticky="nsew")
+        ctk.CTkLabel(right, text="PREVIEW", font=FONT_SEC,
+                     text_color=PRIMARY).pack(anchor="w", padx=10, pady=(8, 4))
+
+        self._preview = tk.Text(
+            right,
+            bg=CARD, fg=FG,
+            font=("Courier New", 10),
+            relief="flat", bd=0, highlightthickness=0,
+            state="disabled", wrap="none",
+        )
+        scroll = tk.Scrollbar(right, orient="vertical",
+                              command=self._preview.yview)
+        self._preview.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y", pady=(0, 6), padx=(0, 4))
+        self._preview.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        self._placeholder = ctk.CTkLabel(right,
+                                          text="← Select a macro to preview",
+                                          font=FONT_S, text_color=MUTED)
+        self._placeholder.place(relx=0.5, rely=0.5, anchor="center")
+
+        # ── Buttons ──────────────────────────────────────────────────────────
+        ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(fill="x", padx=20)
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(8, 16))
+
+        ctk.CTkButton(btn_row, text="Cancel", width=90, font=FONT_M,
+                      fg_color=CARD, hover_color=HOVER,
+                      command=self.destroy).pack(side="left")
+        self._del_btn = ctk.CTkButton(btn_row, text="🗑 Delete", width=90,
+                                       font=FONT_M, fg_color=CARD,
+                                       hover_color=DANGER, text_color=DANGER,
+                                       state="disabled",
+                                       command=self._delete)
+        self._del_btn.pack(side="left", padx=(8, 0))
+        self._load_btn = ctk.CTkButton(btn_row, text="📂 Load Macro",
+                                        font=FONT_M, fg_color=PRIMARY,
+                                        hover_color="#006CBE",
+                                        state="disabled",
+                                        command=self._load)
+        self._load_btn.pack(side="right")
+
+    def _on_select(self, _=None):
+        sel = self._listbox.curselection()
+        if not sel:
+            return
+        name = self._listbox.get(sel[0]).strip()
+        self._selected = name
+        self._load_btn.configure(state="normal")
+        self._del_btn.configure(state="normal")
+        self._placeholder.place_forget()
+
+        steps = self._macros.get(name, [])
+        lines = [f"  {i+1:>2}.  {MacroStep.from_dict(dict(s)).label()}"
+                 for i, s in enumerate(steps)]
+        preview_text = "\n".join(lines) if lines else "  (no steps)"
+
+        self._preview.configure(state="normal")
+        self._preview.delete("1.0", "end")
+        self._preview.insert("end", preview_text)
+        self._preview.configure(state="disabled")
+
+    def _load(self):
+        if self._selected:
+            self._callback(self._selected)
+            self.destroy()
+
+    def _delete(self):
+        if not self._selected:
+            return
+        if messagebox.askyesno("Delete", f'Delete macro "{self._selected}"?',
+                               parent=self):
+            del self._macros[self._selected]
+            # Persist deletion
+            try:
+                if os.path.exists(SAVE_FILE):
+                    with open(SAVE_FILE) as f:
+                        data = json.load(f)
+                    data.get("macros", {}).pop(self._selected, None)
+                    with open(SAVE_FILE, "w") as f:
+                        json.dump(data, f, indent=2)
+            except Exception:
+                pass
+            self._selected = None
+            self._load_btn.configure(state="disabled")
+            self._del_btn.configure(state="disabled")
+            self._listbox.delete(0, "end")
+            for name in sorted(self._macros.keys()):
+                self._listbox.insert("end", f"  {name}")
+            self._preview.configure(state="normal")
+            self._preview.delete("1.0", "end")
+            self._preview.configure(state="disabled")
+            self._placeholder.place(relx=0.5, rely=0.5, anchor="center")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  MACRO PANEL
 # ─────────────────────────────────────────────────────────────────────────────
 class MacroPanel(ctk.CTkFrame):
@@ -574,6 +723,7 @@ class MacroPanel(ctk.CTkFrame):
         self._start_hk = "f7"
         self._stop_hk  = "f8"
         self._editing_index = None
+        self._current_macro_name = "My Macro"
         self._build_ui()
         self._rebind_hotkeys()
         self._load_macros()
@@ -779,35 +929,81 @@ class MacroPanel(ctk.CTkFrame):
             self._refresh_list()
 
     # ── Persistence ───────────────────────────────────────────────────────────
+    def _read_save_file(self) -> dict:
+        """Load the save file and normalise to {"macros": {name: [dicts]}}."""
+        if not os.path.exists(SAVE_FILE):
+            return {"macros": {}}
+        try:
+            with open(SAVE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            # Migrate old single-macro format
+            if "steps" in data and "macros" not in data:
+                return {"macros": {"Default": data["steps"]},
+                        "last_used": "Default"}
+            if "macros" in data:
+                return data
+        except Exception:
+            pass
+        return {"macros": {}}
+
+    def _write_save_file(self, data: dict):
+        with open(SAVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
     def _load_macros(self):
-        if os.path.exists(SAVE_FILE):
-            try:
-                with open(SAVE_FILE) as f:
-                    data = json.load(f)
-                if "steps" in data:
-                    self._steps = [MacroStep.from_dict(s) for s in data["steps"]]
-                    self._refresh_list()
-            except Exception:
-                pass
+        """Auto-load the last-used macro on startup."""
+        data = self._read_save_file()
+        last = data.get("last_used", "")
+        macros = data.get("macros", {})
+        # Fall back to first macro if last_used is gone
+        if last not in macros and macros:
+            last = next(iter(macros))
+        if last and last in macros:
+            self._current_macro_name = last
+            self._steps = [MacroStep.from_dict(dict(s)) for s in macros[last]]
+            self._refresh_list()
 
     def _save_preset(self):
-        data = {"steps": [s.to_dict() for s in self._steps]}
-        with open(SAVE_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-        messagebox.showinfo("Saved", "Macro saved to macros.json")
+        if not self._steps:
+            messagebox.showwarning("No Steps", "Add steps before saving.")
+            return
+        default_name = getattr(self, "_current_macro_name", "My Macro")
+        name = simpledialog.askstring(
+            "Save Macro",
+            "Enter a name for this macro:",
+            initialvalue=default_name,
+            parent=self.winfo_toplevel(),
+        )
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        data = self._read_save_file()
+        data.setdefault("macros", {})[name] = [s.to_dict() for s in self._steps]
+        data["last_used"] = name
+        self._write_save_file(data)
+        self._current_macro_name = name
+        messagebox.showinfo("Saved", f'Macro "{name}" saved.')
 
     def _load_preset(self):
-        if os.path.exists(SAVE_FILE):
-            try:
-                with open(SAVE_FILE) as f:
-                    data = json.load(f)
-                if "steps" in data:
-                    self._steps = [MacroStep.from_dict(s) for s in data["steps"]]
-                    self._refresh_list()
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
-        else:
-            messagebox.showinfo("Load", "No saved macro found.")
+        data = self._read_save_file()
+        macros = data.get("macros", {})
+        if not macros:
+            messagebox.showinfo("Load Macro",
+                                "No saved macros found.\n"
+                                "Save a macro first with the Save button.")
+            return
+
+        def on_chosen(name: str):
+            steps_data = macros.get(name, [])
+            self._steps = [MacroStep.from_dict(dict(s)) for s in steps_data]
+            self._current_macro_name = name
+            self._refresh_list()
+            # Update last_used
+            d = self._read_save_file()
+            d["last_used"] = name
+            self._write_save_file(d)
+
+        LoadMacroDialog(self, dict(macros), on_chosen)
 
     # ── Controls ──────────────────────────────────────────────────────────────
     def _on_repeat_change(self):
