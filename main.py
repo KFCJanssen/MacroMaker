@@ -324,12 +324,11 @@ class AutoClickerPanel(ctk.CTkScrollableFrame):
         pick_position(root, got)
 
     def _on_hotkey_change(self, val):
-        self._hotkey_key = val.lower()
         self._rebind_hotkey()
 
     def _rebind_hotkey(self):
-        for k in AVAILABLE_KEYS:
-            self._hk.unbind(k)
+        self._hk.unbind(self._hotkey_key)
+        self._hotkey_key = self._hk_var.get().lower()
         self._hk.bind(self._hotkey_key, self._toggle)
 
     def _apply_settings(self):
@@ -368,8 +367,7 @@ class AutoClickerPanel(ctk.CTkScrollableFrame):
 
     def cleanup(self):
         self._clicker.stop()
-        for k in AVAILABLE_KEYS:
-            self._hk.unbind(k)
+        self._hk.unbind(self._hotkey_key)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -379,7 +377,7 @@ class AddStepDialog(ctk.CTkToplevel):
     def __init__(self, master, step=None, callback=None, **kwargs):
         super().__init__(master, **kwargs)
         self.title("Edit Step" if step else "Add Step")
-        self.geometry("440x390")
+        self.geometry("440x460")
         self.resizable(False, False)
         self.configure(fg_color=BG)
         self.grab_set()
@@ -409,6 +407,7 @@ class AddStepDialog(ctk.CTkToplevel):
         self._y_var   = tk.StringVar(value=str(step.data.get("y", 500)) if step else "500")
         self._btn_var = tk.StringVar(value=step.data.get("button", "left") if step else "left")
         self._keys_var = tk.StringVar(value=step.data.get("keys", "") if step else "")
+        self._dur_var = tk.StringVar(value=str(step.data.get("duration_ms", 50)) if step else "50")
         self._ms_var  = tk.StringVar(value=str(step.data.get("ms", 500)) if step else "500")
         self._dir_var = tk.StringVar(value=step.data.get("direction", "up") if step else "up")
         self._amt_var = tk.StringVar(value=str(step.data.get("amount", 3)) if step else "3")
@@ -471,6 +470,17 @@ class AddStepDialog(ctk.CTkToplevel):
             ctk.CTkEntry(self._fields_frame, textvariable=self._keys_var,
                          width=260, fg_color=CARD,
                          border_color=BORDER).pack(anchor="w", pady=4)
+            self._lbl("Hold duration (ms) — how long the key stays pressed")
+            dur_row = ctk.CTkFrame(self._fields_frame, fg_color="transparent")
+            dur_row.pack(fill="x", pady=4)
+            ctk.CTkEntry(dur_row, textvariable=self._dur_var, width=80,
+                         fg_color=CARD, border_color=BORDER).pack(side="left")
+            for v in [30, 50, 100, 200, 500]:
+                ctk.CTkButton(dur_row, text=str(v), width=46, height=26,
+                              font=FONT_S, fg_color=CARD, hover_color=HOVER,
+                              border_width=1, border_color=BORDER,
+                              command=lambda x=v: self._dur_var.set(str(x))
+                              ).pack(side="left", padx=3)
 
         if t == "delay":
             self._lbl("Duration (ms)")
@@ -532,6 +542,10 @@ class AddStepDialog(ctk.CTkToplevel):
                 data["button"] = self._btn_var.get()
             if t == "keypress":
                 data["keys"] = self._keys_var.get().strip()
+                try:
+                    data["duration_ms"] = max(0, int(self._dur_var.get()))
+                except ValueError:
+                    data["duration_ms"] = 50
             if t == "delay":
                 data["ms"] = int(self._ms_var.get())
             if t == "scroll":
@@ -709,7 +723,7 @@ class MacroPanel(ctk.CTkFrame):
     def _default_data(self, t):
         if t == "click":    return {"x": 500, "y": 500, "button": "left"}
         if t == "move":     return {"x": 500, "y": 500}
-        if t == "keypress": return {"keys": ""}
+        if t == "keypress": return {"keys": "", "duration_ms": 50}
         if t == "delay":    return {"ms": 500}
         if t == "scroll":   return {"x": 500, "y": 500, "direction": "up", "amount": 3}
         return {}
@@ -801,13 +815,14 @@ class MacroPanel(ctk.CTkFrame):
         self._rep_n_entry.configure(state=state)
 
     def _on_hotkeys_change(self, _=None):
-        self._start_hk = self._start_hk_var.get().lower()
-        self._stop_hk  = self._stop_hk_var.get().lower()
         self._rebind_hotkeys()
 
     def _rebind_hotkeys(self):
-        for k in AVAILABLE_KEYS:
-            self._hk.unbind(k)
+        self._hk.unbind(self._start_hk)
+        if self._stop_hk != self._start_hk:
+            self._hk.unbind(self._stop_hk)
+        self._start_hk = self._start_hk_var.get().lower()
+        self._stop_hk  = self._stop_hk_var.get().lower()
         self._hk.bind(self._start_hk, self._start_macro)
         if self._stop_hk != self._start_hk:
             self._hk.bind(self._stop_hk, self._stop_macro)
@@ -854,8 +869,9 @@ class MacroPanel(ctk.CTkFrame):
 
     def cleanup(self):
         self._runner.stop()
-        for k in AVAILABLE_KEYS:
-            self._hk.unbind(k)
+        self._hk.unbind(self._start_hk)
+        if self._stop_hk != self._start_hk:
+            self._hk.unbind(self._stop_hk)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
