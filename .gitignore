@@ -9,3 +9,7 @@ __pycache__/
 
 # Local macros saved by the app
 macros.json
+
+# Built executables and release archives (attach these to GitHub Releases instead)
+*.exe
+*.zip

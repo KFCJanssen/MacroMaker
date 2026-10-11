@@ -14,6 +14,7 @@ import platform
 
 from auto_clicker import AutoClicker
 from macro_runner import MacroRunner, MacroStep
+from macro_recorder import MacroRecorder
 from hotkeys import HotkeyManager, AVAILABLE_KEYS
 
 # ── Windows 10 Dark Mode Theme ────────────────────────────────────────────────
@@ -31,6 +32,7 @@ DANGER  = "#D13438"   # stop / destructive
 FG      = "#FFFFFF"   # primary text
 ACTIVE  = "#107C10"   # running / success green
 SEG_FG  = "#CCCCCC"   # unselected tab text
+RECORD  = "#C42B1C"   # recording red
 
 FONT_TITLE = ("Segoe UI", 20, "bold")
 FONT_NAV   = ("Segoe UI", 13)
@@ -733,17 +735,23 @@ class LoadMacroDialog(ctk.CTkToplevel):
 # ─────────────────────────────────────────────────────────────────────────────
 #  MACRO PANEL
 # ─────────────────────────────────────────────────────────────────────────────
-class MacroPanel(ctk.CTkFrame):
+class MacroPanel(ctk.CTkScrollableFrame):
     def __init__(self, master, hotkey_mgr: HotkeyManager, **kwargs):
-        super().__init__(master, fg_color="transparent", **kwargs)
+        super().__init__(master, fg_color="transparent",
+                         scrollbar_button_color=BORDER,
+                         scrollbar_button_hover_color=HOVER, **kwargs)
         self._hk = hotkey_mgr
         self._runner = MacroRunner(
             on_status_change=self._on_status,
             on_step_change=self._on_step,
         )
+        self._recorder = MacroRecorder(
+            on_status_change=self._on_record_status,
+        )
         self._steps: list[MacroStep] = []
-        self._start_hk = "f7"
-        self._stop_hk  = "f8"
+        self._start_hk  = "f7"
+        self._stop_hk   = "f8"
+        self._record_hk = "f9"
         self._editing_index = None
         self._current_macro_name = "My Macro"
         self._build_ui()
@@ -767,9 +775,66 @@ class MacroPanel(ctk.CTkFrame):
                 side="right", padx=(6, 0))
 
         ctk.CTkLabel(self,
-                     text="Record a sequence of actions, then replay with a hotkey.",
+                     text="Record or build a sequence of actions, then replay with a hotkey.",
                      font=FONT_S, text_color=MUTED).pack(
             anchor="w", padx=24, pady=(0, 4))
+
+        ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(
+            fill="x", padx=24, pady=8)
+
+        # ── RECORD CONTROLS ──────────────────────────────────────────────────
+        section_label(self, "Record")
+
+        rec_outer = ctk.CTkFrame(self, fg_color=CARD, corner_radius=6,
+                                  border_width=1, border_color=BORDER)
+        rec_outer.pack(fill="x", padx=24, pady=(4, 0))
+
+        rec_inner = ctk.CTkFrame(rec_outer, fg_color="transparent")
+        rec_inner.pack(fill="x", padx=12, pady=10)
+
+        # Record button
+        self._rec_btn = ctk.CTkButton(
+            rec_inner,
+            text="⏺   Record",
+            font=FONT_H,
+            height=38,
+            width=160,
+            fg_color=RECORD,
+            hover_color="#A32318",
+            command=self._toggle_record,
+        )
+        self._rec_btn.pack(side="left")
+
+        # Recording status badge
+        self._rec_status = ctk.CTkFrame(rec_inner, fg_color="transparent")
+        self._rec_status.pack(side="left", padx=(14, 0))
+        self._rec_dot = ctk.CTkLabel(self._rec_status, text="●",
+                                      font=("Segoe UI", 9), text_color=MUTED, width=14)
+        self._rec_dot.pack(side="left")
+        self._rec_label = ctk.CTkLabel(self._rec_status, text="Not recording",
+                                        font=FONT_XS, text_color=MUTED)
+        self._rec_label.pack(side="left", padx=(2, 0))
+
+        # Hotkey label (right-aligned)
+        self._rec_hk_label = ctk.CTkLabel(rec_inner, text="Hotkey: F9",
+                                            font=FONT_XS, text_color=MUTED)
+        self._rec_hk_label.pack(side="right")
+
+        # Record options row
+        rec_opts = ctk.CTkFrame(rec_outer, fg_color="transparent")
+        rec_opts.pack(fill="x", padx=12, pady=(0, 10))
+
+        ctk.CTkLabel(rec_opts, text="When done recording:",
+                     font=FONT_S, text_color=MUTED).pack(side="left")
+
+        self._rec_append_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(rec_opts,
+                         text="Append to existing steps",
+                         variable=self._rec_append_var,
+                         font=FONT_S,
+                         checkbox_width=16, checkbox_height=16,
+                         border_color=BORDER,
+                         hover_color=PRIMARY).pack(side="left", padx=(14, 0))
 
         ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(
             fill="x", padx=24, pady=8)
@@ -864,6 +929,15 @@ class MacroPanel(ctk.CTkFrame):
                      text_color=MUTED).pack(side="left")
         self._stop_hk_var = tk.StringVar(value="F8")
         ctk.CTkOptionMenu(hk, variable=self._stop_hk_var, width=80,
+                          values=[k.upper() for k in AVAILABLE_KEYS],
+                          font=FONT_M, fg_color=CARD, button_color=BORDER,
+                          button_hover_color=HOVER,
+                          command=self._on_hotkeys_change).pack(
+            side="left", padx=(6, 18))
+        ctk.CTkLabel(hk, text="Record:", font=FONT_M,
+                     text_color=MUTED).pack(side="left")
+        self._record_hk_var = tk.StringVar(value="F9")
+        ctk.CTkOptionMenu(hk, variable=self._record_hk_var, width=80,
                           values=[k.upper() for k in AVAILABLE_KEYS],
                           font=FONT_M, fg_color=CARD, button_color=BORDER,
                           button_hover_color=HOVER,
@@ -1039,11 +1113,75 @@ class MacroPanel(ctk.CTkFrame):
         self._hk.unbind(self._start_hk)
         if self._stop_hk != self._start_hk:
             self._hk.unbind(self._stop_hk)
-        self._start_hk = self._start_hk_var.get().lower()
-        self._stop_hk  = self._stop_hk_var.get().lower()
-        self._hk.bind(self._start_hk, self._start_macro)
+        self._hk.unbind(self._record_hk)
+
+        self._start_hk  = self._start_hk_var.get().lower()
+        self._stop_hk   = self._stop_hk_var.get().lower()
+        self._record_hk = self._record_hk_var.get().lower()
+
+        self._hk.bind(self._start_hk,  self._start_macro)
         if self._stop_hk != self._start_hk:
             self._hk.bind(self._stop_hk, self._stop_macro)
+        self._hk.bind(self._record_hk, self._toggle_record)
+
+        # Tell the recorder which keys to ignore so it doesn't capture hotkeys
+        ignored = {self._start_hk, self._stop_hk, self._record_hk}
+        self._recorder._ignored_hk_names = ignored
+
+        # Update label in the record card
+        if hasattr(self, "_rec_hk_label"):
+            self._rec_hk_label.configure(
+                text=f"Hotkey: {self._record_hk_var.get()}")
+
+    # ── Recording ─────────────────────────────────────────────────────────────
+    def _toggle_record(self):
+        if self._recorder.recording:
+            self._stop_record()
+        else:
+            self._start_record()
+
+    def _start_record(self):
+        if self._runner.running:
+            messagebox.showwarning("Recording",
+                                   "Stop the macro before recording.",
+                                   parent=self.winfo_toplevel())
+            return
+        self._recorder.clear()
+        self._recorder.start()
+
+    def _stop_record(self):
+        self._recorder.stop()
+        new_steps = self._recorder.get_steps()
+        if not new_steps:
+            messagebox.showinfo("Recording", "No actions were recorded.",
+                                parent=self.winfo_toplevel())
+            return
+        if self._rec_append_var.get() and self._steps:
+            self._steps.extend(new_steps)
+        else:
+            self._steps = new_steps
+        self._refresh_list()
+
+    def _on_record_status(self, recording: bool):
+        """Called from recorder thread — update UI on main thread."""
+        def _update():
+            if recording:
+                self._rec_dot.configure(text_color=RECORD)
+                self._rec_label.configure(text="Recording…", text_color=RECORD)
+                self._rec_btn.configure(
+                    text="⏹   Stop Recording",
+                    fg_color="#8B1A14",
+                    hover_color="#6E1410",
+                )
+            else:
+                self._rec_dot.configure(text_color=MUTED)
+                self._rec_label.configure(text="Not recording", text_color=MUTED)
+                self._rec_btn.configure(
+                    text="⏺   Record",
+                    fg_color=RECORD,
+                    hover_color="#A32318",
+                )
+        self.after(0, _update)
 
     def _apply_settings(self):
         self._runner.steps = self._steps
@@ -1086,10 +1224,12 @@ class MacroPanel(ctk.CTkFrame):
         self.after(0, _do)
 
     def cleanup(self):
+        self._recorder.stop()
         self._runner.stop()
         self._hk.unbind(self._start_hk)
         if self._stop_hk != self._start_hk:
             self._hk.unbind(self._stop_hk)
+        self._hk.unbind(self._record_hk)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1117,6 +1257,15 @@ class App(ctk.CTk):
         ctk.CTkLabel(title_bar, text="⚡  Macro Maker", font=("Segoe UI", 15),
                      text_color=FG).pack(side="left", padx=20, pady=14)
 
+        # ── Footer (packed BEFORE body so it is never squeezed out) ──────────
+        footer = ctk.CTkFrame(self, fg_color=NAV, corner_radius=0, height=28)
+        footer.pack(fill="x", side="bottom")
+        footer.pack_propagate(False)
+        ctk.CTkLabel(footer,
+                     text=f"Emergency stop: move mouse to top-left  |  "
+                          f"Macros saved to: {SAVE_FILE}",
+                     font=("Segoe UI", 9), text_color=MUTED).pack(pady=6)
+
         # ── Body: nav sidebar + content ───────────────────────────────────────
         body = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         body.pack(fill="both", expand=True)
@@ -1128,7 +1277,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(nav, text="⚡ Macro Maker", font=("Segoe UI", 13, "bold"),
                      text_color=FG).pack(anchor="w", padx=16, pady=(20, 4))
-        ctk.CTkLabel(nav, text="v1.0", font=FONT_XS,
+        ctk.CTkLabel(nav, text="v1.3", font=FONT_XS,
                      text_color=MUTED).pack(anchor="w", padx=16, pady=(0, 14))
 
         ctk.CTkFrame(nav, height=1, fg_color=BORDER).pack(
@@ -1160,15 +1309,6 @@ class App(ctk.CTk):
         self._hk_mgr = self._hk
         self._ac_panel = AutoClickerPanel(self._content, self._hk_mgr)
         self._macro_panel = MacroPanel(self._content, self._hk_mgr)
-
-        # Footer
-        footer = ctk.CTkFrame(self, fg_color=NAV, corner_radius=0, height=28)
-        footer.pack(fill="x", side="bottom")
-        footer.pack_propagate(False)
-        ctk.CTkLabel(footer,
-                     text=f"Emergency stop: move mouse to top-left  |  "
-                          f"Macros saved to: {SAVE_FILE}",
-                     font=("Segoe UI", 9), text_color=MUTED).pack(pady=6)
 
         self._select_nav("Auto Clicker")
 
