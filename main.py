@@ -11,10 +11,12 @@ import json
 import os
 import sys
 import platform
+import time
 
 from auto_clicker import AutoClicker
 from macro_runner import MacroRunner, MacroStep
 from macro_recorder import MacroRecorder
+from mouse_jiggler import MouseJiggler
 from hotkeys import HotkeyManager, AVAILABLE_KEYS
 
 # ── Windows 10 Dark Mode Theme ────────────────────────────────────────────────
@@ -386,6 +388,137 @@ class AutoClickerPanel(ctk.CTkScrollableFrame):
     def cleanup(self):
         self._clicker.stop()
         self._hk.unbind(self._hotkey_key)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MOUSE JIGGLER PANEL
+# ─────────────────────────────────────────────────────────────────────────────
+class JigglerPanel(ctk.CTkScrollableFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color="transparent",
+                         scrollbar_button_color=BORDER,
+                         scrollbar_button_hover_color=HOVER, **kwargs)
+        self._jiggler = MouseJiggler(on_status_change=self._on_status,
+                                     on_jiggle=self._on_jiggle)
+        self._build_ui()
+
+    def _build_ui(self):
+        ctk.CTkLabel(self, text="Mouse Jiggler", font=FONT_TITLE,
+                     text_color=FG).pack(anchor="w", padx=24, pady=(20, 2))
+        ctk.CTkLabel(self,
+                     text="Nudges the mouse back and forth so your PC doesn't "
+                          "go to sleep and games like Roblox don't kick you for being idle.",
+                     font=FONT_S, text_color=MUTED,
+                     wraplength=520, justify="left").pack(
+            anchor="w", padx=24, pady=(0, 4))
+
+        separator(self)
+
+        # ── INTERVAL ──────────────────────────────────────────────────────────
+        section_label(self, "Interval")
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=24, pady=(0, 8))
+        self._interval_var = tk.StringVar(value="30")
+        ctk.CTkLabel(row, text="Jiggle every", font=FONT_M,
+                     text_color=FG).pack(side="left")
+        ctk.CTkLabel(row, text="How long between each jiggle",
+                     font=FONT_XS, text_color=MUTED).pack(side="left", padx=8)
+        ctk.CTkEntry(row, textvariable=self._interval_var, width=80,
+                     fg_color=CARD, border_color=BORDER,
+                     font=FONT_M).pack(side="right")
+        ctk.CTkLabel(row, text="sec", font=FONT_S,
+                     text_color=MUTED).pack(side="right", padx=4)
+
+        chip_row = ctk.CTkFrame(self, fg_color="transparent")
+        chip_row.pack(anchor="w", padx=24, pady=(0, 4))
+        for s, txt in [(10, "10s"), (30, "30s"), (60, "1 min"),
+                       (120, "2 min"), (300, "5 min")]:
+            ctk.CTkButton(chip_row, text=txt, width=60, height=28,
+                          font=FONT_S, fg_color=CARD, hover_color=HOVER,
+                          border_width=1, border_color=BORDER,
+                          command=lambda v=s: self._interval_var.set(str(v))
+                          ).pack(side="left", padx=(0, 6))
+
+        separator(self)
+
+        # ── BEHAVIOUR ─────────────────────────────────────────────────────────
+        section_label(self, "Behaviour")
+
+        dist_row = SettingsRow(self, "Jiggle distance",
+                               "How far the mouse moves before coming back")
+        dist_row.pack(fill="x", padx=24, pady=(0, 8))
+        self._dist_var = tk.StringVar(value="2 px")
+        dist_row.add_widget(ctk.CTkOptionMenu(
+            dist_row, variable=self._dist_var,
+            values=["1 px", "2 px", "5 px", "10 px", "25 px"],
+            width=80, font=FONT_M, fg_color=CARD,
+            button_color=BORDER, button_hover_color=HOVER))
+
+        idle_row = SettingsRow(self, "Only when idle",
+                               "Pause while you're using the mouse or keyboard yourself")
+        idle_row.pack(fill="x", padx=24, pady=(0, 8))
+        self._idle_var = tk.BooleanVar(value=True)
+        idle_row.add_widget(W10Toggle(idle_row, variable=self._idle_var))
+
+        ctk.CTkLabel(self,
+                     text="While running, Windows is also told not to sleep "
+                          "or turn off the screen.",
+                     font=FONT_XS, text_color=MUTED,
+                     wraplength=520, justify="left").pack(
+            anchor="w", padx=24, pady=(0, 4))
+
+        separator(self)
+
+        # ── CONTROLS ──────────────────────────────────────────────────────────
+        ctrl = ctk.CTkFrame(self, fg_color="transparent")
+        ctrl.pack(fill="x", padx=24, pady=(4, 4))
+        self._toggle_btn = ctk.CTkButton(
+            ctrl, text="▶   Turn on", font=FONT_H, height=44,
+            fg_color=PRIMARY, hover_color="#006CBE",
+            command=self._toggle)
+        self._toggle_btn.pack(side="left", fill="x", expand=True)
+        self._status = StatusBadge(ctrl)
+        self._status.pack(side="left", padx=(12, 0))
+
+        self._count_label = ctk.CTkLabel(self, text="", font=FONT_XS,
+                                         text_color=MUTED)
+        self._count_label.pack(anchor="w", padx=24, pady=(0, 24))
+
+    def _apply_settings(self):
+        try:
+            self._jiggler.interval_s = max(1, int(float(self._interval_var.get())))
+        except ValueError:
+            self._jiggler.interval_s = 30
+            self._interval_var.set("30")
+        self._jiggler.distance_px = int(self._dist_var.get().split()[0])
+        self._jiggler.only_when_idle = self._idle_var.get()
+
+    def _toggle(self):
+        if self._jiggler.running:
+            self._jiggler.stop()
+        else:
+            self._apply_settings()
+            self._jiggler.start()
+
+    def _on_status(self, running: bool):
+        def _update():
+            self._status.set_running(running, text="On")
+            self._toggle_btn.configure(
+                text="⏹   Turn off" if running else "▶   Turn on",
+                fg_color=DANGER if running else PRIMARY,
+                hover_color="#B52F32" if running else "#006CBE")
+            self._count_label.configure(
+                text="Waiting for the first jiggle…" if running else "")
+        self.after(0, _update)
+
+    def _on_jiggle(self, count: int):
+        stamp = time.strftime("%H:%M:%S")
+        self.after(0, lambda: self._count_label.configure(
+            text=f"Jiggled {count}× — last at {stamp}"))
+
+    def cleanup(self):
+        self._jiggler.stop()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1277,7 +1410,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(nav, text="⚡ Macro Maker", font=("Segoe UI", 13, "bold"),
                      text_color=FG).pack(anchor="w", padx=16, pady=(20, 4))
-        ctk.CTkLabel(nav, text="v1.3", font=FONT_XS,
+        ctk.CTkLabel(nav, text="v1.4", font=FONT_XS,
                      text_color=MUTED).pack(anchor="w", padx=16, pady=(0, 14))
 
         ctk.CTkFrame(nav, height=1, fg_color=BORDER).pack(
@@ -1285,7 +1418,7 @@ class App(ctk.CTk):
 
         self._nav_btns: list[ctk.CTkButton] = []
 
-        for icon, label in [("🖱", "Auto Clicker"), ("⌨", "Macro Maker")]:
+        for icon, label in [("🖱", "Auto Clicker"), ("⌨", "Macro Maker"), ("↔", "Mouse Jiggler")]:
             btn = ctk.CTkButton(
                 nav,
                 text=f"  {icon}  {label}",
@@ -1309,6 +1442,12 @@ class App(ctk.CTk):
         self._hk_mgr = self._hk
         self._ac_panel = AutoClickerPanel(self._content, self._hk_mgr)
         self._macro_panel = MacroPanel(self._content, self._hk_mgr)
+        self._jiggle_panel = JigglerPanel(self._content)
+        self._panels = {
+            "Auto Clicker": self._ac_panel,
+            "Macro Maker": self._macro_panel,
+            "Mouse Jiggler": self._jiggle_panel,
+        }
 
         self._select_nav("Auto Clicker")
 
@@ -1320,16 +1459,15 @@ class App(ctk.CTk):
             else:
                 btn.configure(fg_color="transparent", hover_color=HOVER)
 
-        if label == "Auto Clicker":
-            self._macro_panel.pack_forget()
-            self._ac_panel.pack(fill="both", expand=True)
-        else:
-            self._ac_panel.pack_forget()
-            self._macro_panel.pack(fill="both", expand=True)
+        for name, panel in self._panels.items():
+            if name != label:
+                panel.pack_forget()
+        self._panels[label].pack(fill="both", expand=True)
 
     def _on_close(self):
         self._ac_panel.cleanup()
         self._macro_panel.cleanup()
+        self._jiggle_panel.cleanup()
         self._hk.stop()
         self.destroy()
 

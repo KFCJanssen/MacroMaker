@@ -1,6 +1,6 @@
 # Macro Maker — Desktop
 
-Auto clicker & macro tool for Windows with global F-key hotkeys. Record your actions or build a macro step by step, then replay it from any window.
+Auto clicker, macro tool and mouse jiggler for Windows with global F-key hotkeys. Record your actions or build a macro step by step, then replay it from any window.
 
 ## Download
 
@@ -39,6 +39,13 @@ Double-click `build_exe.bat`. The result lands in `dist\MacroMaker.exe`.
 - 💾 Save macros and 📂 reload them later (stored in `%APPDATA%\MacroMaker\macros.json`)
 - On Windows, playback uses the legacy `mouse_event` / `SetCursorPos` input path (like TinyTask), so it also works in games that ignore normal simulated input
 
+### Mouse Jiggler
+- Nudges the mouse a few pixels and straight back, so your PC doesn't sleep and games like Roblox don't kick you for being idle
+- Simple on/off button, no hotkey needed
+- Jiggle every 10 s – 5 min (or any custom number of seconds), distance 1–25 px
+- **Only when idle** (on by default) — pauses while you're using the mouse or keyboard yourself
+- While on, Windows is told not to sleep or turn off the screen
+
 ## Emergency Stop
 
 Move your mouse to the **top-left corner of your screen** — pyautogui's failsafe will immediately halt all automation.
@@ -56,6 +63,7 @@ All hotkeys are configurable from the app UI.
 
 ## Changelog
 
+- **1.4** — Mouse Jiggler page
 - **1.3** — Macro recorder (F9), Win32 legacy input for playback, smoother cursor movement
 - **1.2** — Bug fixes
 - **1.1** — Bug fixes

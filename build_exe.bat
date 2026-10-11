@@ -29,6 +29,7 @@ pyinstaller ^
     --add-data "macro_runner.py;." ^
     --add-data "hotkeys.py;." ^
     --add-data "macro_recorder.py;." ^
+    --add-data "mouse_jiggler.py;." ^
     --hidden-import pynput.keyboard._win32 ^
     --hidden-import pynput.mouse._win32 ^
     --collect-all customtkinter ^
