@@ -68,6 +68,7 @@ All hotkeys are configurable from the app UI.
 
 ## Changelog
 
+- **1.6** — Same ⚡ icon for the .exe, window, taskbar (also when pinned) and tray
 - **1.5** — Runs in the system tray when closed or minimised
 - **1.4** — Mouse Jiggler page
 - **1.3** — Macro recorder (F9), Win32 legacy input for playback, smoother cursor movement

@@ -25,6 +25,30 @@ def make_icon_image(size: int = 64) -> Image.Image:
     return img
 
 
+ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
+
+
+def save_ico(path: str):
+    """Write a multi-size .ico (used for the .exe, window, taskbar and tray)."""
+    big = make_icon_image(256)
+    big.save(path, format="ICO", sizes=[(n, n) for n in ICO_SIZES])
+
+
+def icon_path() -> str:
+    """Path to icon.ico — bundled inside the .exe, next to main.py when run
+    from source, or generated into a temp folder as a last resort."""
+    import os
+    import sys
+    import tempfile
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(base, "icon.ico")
+    if not os.path.exists(path):
+        path = os.path.join(tempfile.gettempdir(), "MacroMaker_icon.ico")
+        if not os.path.exists(path):
+            save_ico(path)
+    return path
+
+
 class TrayIcon:
     def __init__(self, schedule, on_show, on_quit, toggles):
         """
@@ -45,7 +69,11 @@ class TrayIcon:
         items += [pystray.Menu.SEPARATOR,
                   pystray.MenuItem("Quit", self._action(on_quit))]
 
-        self._icon = pystray.Icon("MacroMaker", make_icon_image(),
+        try:
+            image = Image.open(icon_path())
+        except Exception:
+            image = make_icon_image()
+        self._icon = pystray.Icon("MacroMaker", image,
                                   "Macro Maker", menu=pystray.Menu(*items))
 
     # pystray decides how to call an action by counting its parameters (default

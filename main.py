@@ -17,7 +17,7 @@ from auto_clicker import AutoClicker
 from macro_runner import MacroRunner, MacroStep
 from macro_recorder import MacroRecorder
 from mouse_jiggler import MouseJiggler
-from tray import TrayIcon, make_icon_image
+from tray import TrayIcon, icon_path
 from hotkeys import HotkeyManager, AVAILABLE_KEYS
 
 # ── Windows 10 Dark Mode Theme ────────────────────────────────────────────────
@@ -1433,7 +1433,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(nav, text="⚡ Macro Maker", font=("Segoe UI", 13, "bold"),
                      text_color=FG).pack(anchor="w", padx=16, pady=(20, 4))
-        ctk.CTkLabel(nav, text="v1.5", font=FONT_XS,
+        ctk.CTkLabel(nav, text="v1.6", font=FONT_XS,
                      text_color=MUTED).pack(anchor="w", padx=16, pady=(0, 14))
 
         ctk.CTkFrame(nav, height=1, fg_color=BORDER).pack(
@@ -1489,10 +1489,9 @@ class App(ctk.CTk):
 
     # ── Tray behaviour ────────────────────────────────────────────────────────
     def _set_window_icon(self):
+        # .ico holds every size Windows needs (title bar 16px, taskbar 32/48px…)
         try:
-            from PIL import ImageTk
-            self._icon_photo = ImageTk.PhotoImage(make_icon_image(64))
-            self.iconphoto(True, self._icon_photo)
+            self.iconbitmap(default=icon_path())
         except Exception:
             pass
 
@@ -1538,5 +1537,14 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    # Give the app its own taskbar identity so Windows shows our icon (not
+    # Python's) and pinning to the taskbar keeps it.
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "KFCJanssen.MacroMaker")
+        except Exception:
+            pass
     app = App()
     app.mainloop()

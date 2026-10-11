@@ -24,7 +24,8 @@ pyinstaller ^
     --onefile ^
     --windowed ^
     --name "MacroMaker" ^
-    --icon NONE ^
+    --icon icon.ico ^
+    --add-data "icon.ico;." ^
     --add-data "auto_clicker.py;." ^
     --add-data "macro_runner.py;." ^
     --add-data "hotkeys.py;." ^
