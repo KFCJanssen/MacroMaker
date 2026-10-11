@@ -1,0 +1,58 @@
+name: Build & Release
+
+# Runs whenever main changes. If VERSION holds a version that has no release yet,
+# it builds MacroMaker.exe on Windows and publishes a GitHub Release with the .exe attached.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        shell: bash
+        run: |
+          VER="v$(tr -d ' \r\n' < VERSION)"
+          echo "tag=$VER" >> "$GITHUB_OUTPUT"
+          if gh release view "$VER" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $VER already exists - nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/setup-python@v5
+        if: steps.ver.outputs.exists == 'false'
+        with:
+          python-version: "3.12"
+
+      - name: Build MacroMaker.exe
+        if: steps.ver.outputs.exists == 'false'
+        shell: bash
+        run: |
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --onefile --windowed --name MacroMaker \
+            --hidden-import pynput.keyboard._win32 \
+            --hidden-import pynput.mouse._win32 \
+            --collect-all customtkinter \
+            main.py
+
+      - name: Publish release
+        if: steps.ver.outputs.exists == 'false'
+        shell: bash
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          NOTES=$(awk -v v="${TAG#v}" '$0 ~ "^- \\*\\*" v "\\*\\*" {sub(/^- \*\*[^*]+\*\* — /, ""); print}' README.md)
+          gh release create "$TAG" dist/MacroMaker.exe --title "MacroMaker $TAG" --notes "${NOTES:-MacroMaker $TAG}" --target "$GITHUB_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}

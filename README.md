@@ -60,3 +60,7 @@ All hotkeys are configurable from the app UI.
 - **1.2** — Bug fixes
 - **1.1** — Bug fixes
 - **1.0** — First release
+
+## Releasing a new version
+
+Bump the number in `VERSION` (and the changelog above) and push to `main`. GitHub Actions builds `MacroMaker.exe` and publishes the release automatically.
