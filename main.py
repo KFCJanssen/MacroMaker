@@ -18,6 +18,8 @@ from macro_runner import MacroRunner, MacroStep
 from macro_recorder import MacroRecorder
 from mouse_jiggler import MouseJiggler
 from tray import TrayIcon, icon_path
+from app_support import (SingleInstance, load_settings, save_settings,
+                         setup_logging, log)
 from hotkeys import HotkeyManager, AVAILABLE_KEYS
 
 # ── Windows 10 Dark Mode Theme ────────────────────────────────────────────────
@@ -58,8 +60,12 @@ def _get_save_dir() -> str:
     os.makedirs(d, exist_ok=True)
     return d
 
+APP_VERSION = "1.7"
+
 SAVE_DIR  = _get_save_dir()
 SAVE_FILE = os.path.join(SAVE_DIR, "macros.json")
+SETTINGS_FILE = os.path.join(SAVE_DIR, "settings.json")
+LOG_FILE  = os.path.join(SAVE_DIR, "error.log")
 
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
@@ -386,6 +392,18 @@ class AutoClickerPanel(ctk.CTkScrollableFrame):
             hover_color="#B52F32" if running else "#006CBE",
         ))
 
+    # ── Saved settings ────────────────────────────────────────────────────────
+    def persist_vars(self) -> dict:
+        return {"interval": self._interval_var, "follow": self._follow_var,
+                "fixed": self._fixed_var, "x": self._x_var, "y": self._y_var,
+                "button": self._btn_var, "loop": self._loop_var,
+                "count": self._count_var, "hotkey": self._hk_var}
+
+    def after_restore(self):
+        self._update_pos_state()
+        self._on_loop_toggle()
+        self._rebind_hotkey()
+
     def cleanup(self):
         self._clicker.stop()
         self._hk.unbind(self._hotkey_key)
@@ -517,6 +535,14 @@ class JigglerPanel(ctk.CTkScrollableFrame):
         stamp = time.strftime("%H:%M:%S")
         self.after(0, lambda: self._count_label.configure(
             text=f"Jiggled {count}× — last at {stamp}"))
+
+    # ── Saved settings ────────────────────────────────────────────────────────
+    def persist_vars(self) -> dict:
+        return {"interval": self._interval_var, "distance": self._dist_var,
+                "only_when_idle": self._idle_var}
+
+    def after_restore(self):
+        pass
 
     def cleanup(self):
         self._jiggler.stop()
@@ -878,6 +904,7 @@ class MacroPanel(ctk.CTkScrollableFrame):
         self._runner = MacroRunner(
             on_status_change=self._on_status,
             on_step_change=self._on_step,
+            on_wait=self._on_wait,
         )
         self._recorder = MacroRecorder(
             on_status_change=self._on_record_status,
@@ -1041,7 +1068,45 @@ class MacroPanel(ctk.CTkScrollableFrame):
         self._rep_n_entry.pack(side="left")
         ctk.CTkLabel(rep, text="times", font=FONT_S,
                      text_color=MUTED).pack(side="left", padx=6)
+
+        gap_row = SettingsRow(self, "Wait between repeats",
+                              "Pause after each run before starting the next (0 = straight away)")
+        gap_row.pack(fill="x", padx=24, pady=(8, 4))
+        gap_box = ctk.CTkFrame(gap_row, fg_color="transparent")
+        self._gap_var = tk.StringVar(value="0")
+        self._gap_entry = ctk.CTkEntry(gap_box, textvariable=self._gap_var,
+                                       width=70, fg_color=CARD,
+                                       border_color=BORDER, font=FONT_M)
+        self._gap_entry.pack(side="left")
+        ctk.CTkLabel(gap_box, text="sec", font=FONT_S,
+                     text_color=MUTED).pack(side="left", padx=(4, 0))
+        gap_row.add_widget(gap_box)
         self._on_repeat_change()
+
+        ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(
+            fill="x", padx=24, pady=10)
+
+        # Playback
+        section_label(self, "Playback")
+        speed_row = SettingsRow(self, "Speed",
+                                "Speeds up or slows down all delays in the macro")
+        speed_row.pack(fill="x", padx=24, pady=(0, 8))
+        self._speed_var = tk.StringVar(value="1×")
+        speed_row.add_widget(ctk.CTkOptionMenu(
+            speed_row, variable=self._speed_var,
+            values=["0.25×", "0.5×", "0.75×", "1×", "1.5×", "2×", "4×"],
+            width=80, font=FONT_M, fg_color=CARD,
+            button_color=BORDER, button_hover_color=HOVER))
+
+        jit_row = SettingsRow(self, "Random timing variation",
+                              "Varies every delay a little so repeats look less robotic")
+        jit_row.pack(fill="x", padx=24, pady=(0, 4))
+        self._jitter_var = tk.StringVar(value="Off")
+        jit_row.add_widget(ctk.CTkOptionMenu(
+            jit_row, variable=self._jitter_var,
+            values=["Off", "±5%", "±10%", "±20%", "±30%"],
+            width=80, font=FONT_M, fg_color=CARD,
+            button_color=BORDER, button_hover_color=HOVER))
 
         ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(
             fill="x", padx=24, pady=10)
@@ -1237,8 +1302,10 @@ class MacroPanel(ctk.CTkScrollableFrame):
 
     # ── Controls ──────────────────────────────────────────────────────────────
     def _on_repeat_change(self):
-        state = "normal" if self._repeat_var.get() == "count" else "disabled"
-        self._rep_n_entry.configure(state=state)
+        mode = self._repeat_var.get()
+        self._rep_n_entry.configure(state="normal" if mode == "count" else "disabled")
+        if hasattr(self, "_gap_entry"):
+            self._gap_entry.configure(state="disabled" if mode == "once" else "normal")
 
     def _on_hotkeys_change(self, _=None):
         self._rebind_hotkeys()
@@ -1324,6 +1391,14 @@ class MacroPanel(ctk.CTkScrollableFrame):
             self._runner.repeat_count = int(self._rep_n_var.get())
         except ValueError:
             self._runner.repeat_count = 1
+        try:
+            self._runner.cycle_delay_s = max(0.0, float(self._gap_var.get().replace(",", ".")))
+        except ValueError:
+            self._runner.cycle_delay_s = 0.0
+            self._gap_var.set("0")
+        self._runner.speed = float(self._speed_var.get().rstrip("×"))
+        jit = self._jitter_var.get()
+        self._runner.jitter_pct = 0 if jit == "Off" else int(jit.strip("±%"))
 
     def _toggle(self):
         if self._runner.running:
@@ -1349,6 +1424,16 @@ class MacroPanel(ctk.CTkScrollableFrame):
             hover_color="#B52F32" if running else "#006CBE",
         ))
 
+    def _on_wait(self, seconds_left):
+        def _do():
+            if not self._runner.running:
+                return
+            if seconds_left is None:
+                self._status.set_running(True)
+            else:
+                self._status.set_running(True, text=f"Next run in {seconds_left}s")
+        self.after(0, _do)
+
     def _on_step(self, idx: int):
         def _do():
             self._listbox.selection_clear(0, "end")
@@ -1356,6 +1441,18 @@ class MacroPanel(ctk.CTkScrollableFrame):
                 self._listbox.selection_set(idx)
                 self._listbox.see(idx)
         self.after(0, _do)
+
+    # ── Saved settings ────────────────────────────────────────────────────────
+    def persist_vars(self) -> dict:
+        return {"repeat": self._repeat_var, "repeat_n": self._rep_n_var,
+                "wait_between": self._gap_var, "speed": self._speed_var,
+                "variation": self._jitter_var, "append_recording": self._rec_append_var,
+                "start_hotkey": self._start_hk_var, "stop_hotkey": self._stop_hk_var,
+                "record_hotkey": self._record_hk_var}
+
+    def after_restore(self):
+        self._on_repeat_change()
+        self._rebind_hotkeys()
 
     def cleanup(self):
         self._recorder.stop()
@@ -1370,8 +1467,10 @@ class MacroPanel(ctk.CTkScrollableFrame):
 #  MAIN WINDOW  — Windows 10 Settings style with left nav sidebar
 # ─────────────────────────────────────────────────────────────────────────────
 class App(ctk.CTk):
-    def __init__(self):
+    def __init__(self, instance: "SingleInstance | None" = None):
         super().__init__()
+        self._instance = instance
+        self._error_shown = False
         self.title("Macro Maker")
         self.geometry("860x720")
         self.minsize(720, 560)
@@ -1396,13 +1495,20 @@ class App(ctk.CTk):
             ])
         self._tray.start()
         self._tray_state = None
-        self._watch_tray_state()
+        self._current_tab = "Auto Clicker"
 
         self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
         self.bind("<Unmap>", self._on_unmap)
         # customtkinter sets its own window icon shortly after start-up,
         # so apply ours a moment later.
         self.after(300, self._set_window_icon)
+
+        self._restore_settings()
+        self._last_saved = self._collect_settings()
+
+        # A second launch of the .exe signals us to come out of the tray.
+        if self._instance:
+            self._instance.listen(lambda: self.after(0, self._show_from_tray))
 
     def _build_ui(self):
         # ── Title bar area ────────────────────────────────────────────────────
@@ -1433,7 +1539,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(nav, text="⚡ Macro Maker", font=("Segoe UI", 13, "bold"),
                      text_color=FG).pack(anchor="w", padx=16, pady=(20, 4))
-        ctk.CTkLabel(nav, text="v1.6", font=FONT_XS,
+        ctk.CTkLabel(nav, text=f"v{APP_VERSION}", font=FONT_XS,
                      text_color=MUTED).pack(anchor="w", padx=16, pady=(0, 14))
 
         ctk.CTkFrame(nav, height=1, fg_color=BORDER).pack(
@@ -1486,6 +1592,7 @@ class App(ctk.CTk):
             if name != label:
                 panel.pack_forget()
         self._panels[label].pack(fill="both", expand=True)
+        self._current_tab = label
 
     # ── Tray behaviour ────────────────────────────────────────────────────────
     def _set_window_icon(self):
@@ -1514,20 +1621,63 @@ class App(ctk.CTk):
         self.lift()
         self.focus_force()
 
-    def _watch_tray_state(self):
-        # Hotkeys toggle things from other threads, so poll once a second and
-        # refresh the tray menu check marks / tooltip when something changed.
-        state = (self._ac_panel._clicker.running,
-                 self._jiggle_panel._jiggler.running)
-        if state != self._tray_state:
-            self._tray_state = state
-            try:
+    def _tick(self):
+        # Once a second: refresh the tray (hotkeys toggle things from other
+        # threads) and save settings if anything changed since the last save.
+        try:
+            state = (self._ac_panel._clicker.running,
+                     self._jiggle_panel._jiggler.running)
+            if state != self._tray_state:
+                self._tray_state = state
                 self._tray.refresh()
-            except Exception:
-                pass
-        self.after(1000, self._watch_tray_state)
+            self._save_settings_if_changed()
+        except Exception:
+            log.exception("Periodic update failed")
+        self.after(1000, self._tick)
+
+    # ── Saved settings ────────────────────────────────────────────────────────
+    def _collect_settings(self) -> dict:
+        data = {"tab": self._current_tab}
+        for name, panel in self._panels.items():
+            data[name] = {k: v.get() for k, v in panel.persist_vars().items()}
+        return data
+
+    def _restore_settings(self):
+        data = load_settings(SETTINGS_FILE)
+        for name, panel in self._panels.items():
+            saved = data.get(name, {})
+            for key, var in panel.persist_vars().items():
+                if key in saved:
+                    try:
+                        var.set(saved[key])
+                    except Exception:
+                        log.warning("Ignoring bad saved value %s.%s=%r", name, key, saved[key])
+            panel.after_restore()
+        if data.get("tab") in self._panels:
+            self._select_nav(data["tab"])
+        self.after(1000, self._tick)
+
+    def _save_settings_if_changed(self):
+        data = self._collect_settings()
+        if data != self._last_saved:
+            save_settings(SETTINGS_FILE, data)
+            self._last_saved = data
+
+    # ── Errors ────────────────────────────────────────────────────────────────
+    def report_callback_exception(self, exc_type, exc, tb):
+        log.error("Error in UI callback", exc_info=(exc_type, exc, tb))
+        if not self._error_shown:
+            self._error_shown = True
+            messagebox.showerror(
+                "Macro Maker",
+                f"Something went wrong: {exc}\n\n"
+                f"Details were saved to:\n{LOG_FILE}")
 
     def _quit(self):
+        self._save_settings_if_changed()
+        if self._instance:
+            self._instance.close()
+        log.info("Macro Maker closed")
         self._tray.stop()
         self._ac_panel.cleanup()
         self._macro_panel.cleanup()
@@ -1546,5 +1696,11 @@ if __name__ == "__main__":
                 "KFCJanssen.MacroMaker")
         except Exception:
             pass
-    app = App()
+    setup_logging(LOG_FILE, APP_VERSION)
+    instance = SingleInstance()
+    if not instance.is_primary:
+        # Already running (probably hidden in the tray): bring it forward.
+        instance.notify_primary()
+        sys.exit(0)
+    app = App(instance)
     app.mainloop()

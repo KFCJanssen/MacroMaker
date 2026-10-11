@@ -1,3 +1,4 @@
+import random
 import threading
 import time
 import sys
@@ -254,14 +255,18 @@ class MacroStep:
 
 
 class MacroRunner:
-    def __init__(self, on_status_change=None, on_step_change=None):
+    def __init__(self, on_status_change=None, on_step_change=None, on_wait=None):
         self.steps = []
         self.running = False
         self.repeat_mode = "once"
         self.repeat_count = 1
+        self.cycle_delay_s = 0.0   # pause between the end of one run and the next
+        self.speed = 1.0           # 2.0 = twice as fast (delay steps are halved)
+        self.jitter_pct = 0        # random ±% applied to every delay step
         self._thread = None
         self.on_status_change = on_status_change
         self.on_step_change = on_step_change
+        self.on_wait = on_wait     # on_wait(seconds_left) during the pause, None after
         self._current_step = -1
 
     def start(self):
@@ -317,10 +322,7 @@ class MacroRunner:
                 if keys:
                     _press_keys(keys, duration_ms=dur)
             elif step.type == "delay":
-                ms = step.data.get("ms", 500)
-                end = time.time() + ms / 1000.0
-                while self.running and time.time() < end:
-                    time.sleep(0.005)
+                self._sleep(self._scaled_delay_ms(step.data.get("ms", 500)) / 1000.0)
             elif step.type == "scroll":
                 x = step.data.get("x", 0)
                 y = step.data.get("y", 0)
@@ -330,6 +332,38 @@ class MacroRunner:
                 pyautogui.scroll(clicks, x=x, y=y)
         except pyautogui.FailSafeException:
             self.stop()
+
+    def _scaled_delay_ms(self, ms: float) -> float:
+        """Apply playback speed and random variation to a delay step."""
+        ms = ms / max(0.05, self.speed)
+        if self.jitter_pct:
+            j = self.jitter_pct / 100.0
+            ms *= 1 + random.uniform(-j, j)
+        return max(0.0, ms)
+
+    def _sleep(self, seconds: float):
+        """Sleep that returns early as soon as the macro is stopped."""
+        end = time.perf_counter() + seconds
+        while self.running:
+            left = end - time.perf_counter()
+            if left <= 0:
+                break
+            time.sleep(min(left, 0.005))
+
+    def _wait_between_cycles(self):
+        end = time.perf_counter() + self.cycle_delay_s
+        shown = None
+        while self.running:
+            left = end - time.perf_counter()
+            if left <= 0:
+                break
+            secs = int(left + 0.999)          # round up: 4.2 s left -> "5"
+            if secs != shown and self.on_wait:
+                shown = secs
+                self.on_wait(secs)
+            time.sleep(min(left, 0.05))
+        if self.on_wait:
+            self.on_wait(None)
 
     def _run(self):
         runs = 0
@@ -347,6 +381,10 @@ class MacroRunner:
                 break
             elif self.repeat_mode == "count" and runs >= self.repeat_count:
                 break
+            if self.running and self.cycle_delay_s > 0:
+                if self.on_step_change:
+                    self.on_step_change(-1)
+                self._wait_between_cycles()
 
         self.running = False
         self._current_step = -1

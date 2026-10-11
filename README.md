@@ -34,7 +34,8 @@ Double-click `build_exe.bat`. The result lands in `dist\MacroMaker.exe`.
 - Build sequences by hand: Mouse Click, Mouse Move, Key Press, Delay, Scroll
 - 📍 Pick position by clicking anywhere on screen for any step
 - Reorder steps with ↑ ↓ buttons, double-click to edit
-- Repeat: Once / N times / Forever
+- Repeat: Once / N times / Forever, with an optional **wait between repeats** (e.g. run, wait 30 s, run again)
+- **Playback speed** (0.25× – 4×) and optional **random timing variation** (±5–30 %) so repeats look less robotic
 - **Start hotkey** (default F7) and **Stop hotkey** (default F8) — work globally
 - 💾 Save macros and 📂 reload them later (stored in `%APPDATA%\MacroMaker\macros.json`)
 - On Windows, playback uses the legacy `mouse_event` / `SetCursorPos` input path (like TinyTask), so it also works in games that ignore normal simulated input
@@ -50,6 +51,11 @@ Double-click `build_exe.bat`. The result lands in `dist\MacroMaker.exe`.
 - Clicking **X** or minimising hides Macro Maker to the system tray (the **^** next to the clock) instead of quitting — hotkeys, the auto clicker, macros and the jiggler keep running
 - **Left-click** the tray icon to bring the window back
 - **Right-click** for a menu: open, turn the Auto Clicker / Mouse Jiggler on or off, or **Quit**
+
+### Quality of life
+- **Remembers your settings** (intervals, hotkeys, repeat options, last open page…) in `%APPDATA%\MacroMaker\settings.json`
+- **Only one copy runs at a time** — launching it again just brings the existing window back from the tray
+- **Error log** at `%APPDATA%\MacroMaker\error.log` — if something goes wrong, that file says what happened
 
 ## Emergency Stop
 
@@ -68,6 +74,7 @@ All hotkeys are configurable from the app UI.
 
 ## Changelog
 
+- **1.7** — Wait between repeats, playback speed & timing variation, remembers settings, single instance, error log
 - **1.6** — Same ⚡ icon for the .exe, window, taskbar (also when pinned) and tray
 - **1.5** — Runs in the system tray when closed or minimised
 - **1.4** — Mouse Jiggler page
