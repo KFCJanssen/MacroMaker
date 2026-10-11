@@ -14,7 +14,7 @@ if errorlevel 1 (
 )
 
 echo  Installing build dependencies...
-pip install pyinstaller customtkinter pyautogui pynput pillow --quiet --upgrade
+pip install pyinstaller customtkinter pyautogui pynput pillow pystray --quiet --upgrade
 
 echo.
 echo  Building .exe (this takes ~30 seconds)...
@@ -30,6 +30,8 @@ pyinstaller ^
     --add-data "hotkeys.py;." ^
     --add-data "macro_recorder.py;." ^
     --add-data "mouse_jiggler.py;." ^
+    --add-data "tray.py;." ^
+    --hidden-import pystray._win32 ^
     --hidden-import pynput.keyboard._win32 ^
     --hidden-import pynput.mouse._win32 ^
     --collect-all customtkinter ^

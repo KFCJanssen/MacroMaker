@@ -46,6 +46,11 @@ Double-click `build_exe.bat`. The result lands in `dist\MacroMaker.exe`.
 - **Only when idle** (on by default) — pauses while you're using the mouse or keyboard yourself
 - While on, Windows is told not to sleep or turn off the screen
 
+### Runs in the system tray
+- Clicking **X** or minimising hides Macro Maker to the system tray (the **^** next to the clock) instead of quitting — hotkeys, the auto clicker, macros and the jiggler keep running
+- **Left-click** the tray icon to bring the window back
+- **Right-click** for a menu: open, turn the Auto Clicker / Mouse Jiggler on or off, or **Quit**
+
 ## Emergency Stop
 
 Move your mouse to the **top-left corner of your screen** — pyautogui's failsafe will immediately halt all automation.
@@ -63,6 +68,7 @@ All hotkeys are configurable from the app UI.
 
 ## Changelog
 
+- **1.5** — Runs in the system tray when closed or minimised
 - **1.4** — Mouse Jiggler page
 - **1.3** — Macro recorder (F9), Win32 legacy input for playback, smoother cursor movement
 - **1.2** — Bug fixes

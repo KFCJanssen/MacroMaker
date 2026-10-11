@@ -17,6 +17,7 @@ from auto_clicker import AutoClicker
 from macro_runner import MacroRunner, MacroStep
 from macro_recorder import MacroRecorder
 from mouse_jiggler import MouseJiggler
+from tray import TrayIcon, make_icon_image
 from hotkeys import HotkeyManager, AVAILABLE_KEYS
 
 # ── Windows 10 Dark Mode Theme ────────────────────────────────────────────────
@@ -1380,7 +1381,28 @@ class App(ctk.CTk):
         self._hk.start()
 
         self._build_ui()
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # ── System tray: X and minimise hide the window; Quit lives in the tray ──
+        self._tray_hint_shown = False
+        self._tray = TrayIcon(
+            schedule=lambda fn: self.after(0, fn),
+            on_show=self._show_from_tray,
+            on_quit=self._quit,
+            toggles=[
+                ("Auto Clicker", lambda: self._ac_panel._clicker.running,
+                 self._ac_panel._toggle),
+                ("Mouse Jiggler", lambda: self._jiggle_panel._jiggler.running,
+                 self._jiggle_panel._toggle),
+            ])
+        self._tray.start()
+        self._tray_state = None
+        self._watch_tray_state()
+
+        self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
+        self.bind("<Unmap>", self._on_unmap)
+        # customtkinter sets its own window icon shortly after start-up,
+        # so apply ours a moment later.
+        self.after(300, self._set_window_icon)
 
     def _build_ui(self):
         # ── Title bar area ────────────────────────────────────────────────────
@@ -1396,6 +1418,7 @@ class App(ctk.CTk):
         footer.pack_propagate(False)
         ctk.CTkLabel(footer,
                      text=f"Emergency stop: move mouse to top-left  |  "
+                          f"Closing hides to the tray  |  "
                           f"Macros saved to: {SAVE_FILE}",
                      font=("Segoe UI", 9), text_color=MUTED).pack(pady=6)
 
@@ -1410,7 +1433,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(nav, text="⚡ Macro Maker", font=("Segoe UI", 13, "bold"),
                      text_color=FG).pack(anchor="w", padx=16, pady=(20, 4))
-        ctk.CTkLabel(nav, text="v1.4", font=FONT_XS,
+        ctk.CTkLabel(nav, text="v1.5", font=FONT_XS,
                      text_color=MUTED).pack(anchor="w", padx=16, pady=(0, 14))
 
         ctk.CTkFrame(nav, height=1, fg_color=BORDER).pack(
@@ -1464,7 +1487,49 @@ class App(ctk.CTk):
                 panel.pack_forget()
         self._panels[label].pack(fill="both", expand=True)
 
-    def _on_close(self):
+    # ── Tray behaviour ────────────────────────────────────────────────────────
+    def _set_window_icon(self):
+        try:
+            from PIL import ImageTk
+            self._icon_photo = ImageTk.PhotoImage(make_icon_image(64))
+            self.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
+
+    def _on_unmap(self, event):
+        # <Unmap> also fires for child widgets; only react to the window itself
+        # being minimised.
+        if event.widget is self and self.state() == "iconic":
+            self.after(0, self._hide_to_tray)
+
+    def _hide_to_tray(self):
+        self.withdraw()
+        if not self._tray_hint_shown:
+            self._tray_hint_shown = True
+            self._tray.notify("Still running in the system tray. "
+                              "Right-click the icon to quit.")
+
+    def _show_from_tray(self):
+        self.deiconify()
+        self.state("normal")
+        self.lift()
+        self.focus_force()
+
+    def _watch_tray_state(self):
+        # Hotkeys toggle things from other threads, so poll once a second and
+        # refresh the tray menu check marks / tooltip when something changed.
+        state = (self._ac_panel._clicker.running,
+                 self._jiggle_panel._jiggler.running)
+        if state != self._tray_state:
+            self._tray_state = state
+            try:
+                self._tray.refresh()
+            except Exception:
+                pass
+        self.after(1000, self._watch_tray_state)
+
+    def _quit(self):
+        self._tray.stop()
         self._ac_panel.cleanup()
         self._macro_panel.cleanup()
         self._jiggle_panel.cleanup()

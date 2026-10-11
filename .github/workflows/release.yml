@@ -36,14 +36,39 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Smoke test (start, hide to tray, restore, quit)
+        if: steps.ver.outputs.exists == 'false'
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          pip install -r requirements.txt
+          python -c "
+          import main, traceback
+          app = main.App()
+          errors = []
+          def on_error(*exc):
+              errors.append(exc)
+              traceback.print_exception(*exc)
+          app.report_callback_exception = on_error
+          app.after(1500, app._hide_to_tray)
+          app.after(2500, app._show_from_tray)
+          app.after(3000, app._jiggle_panel._toggle)
+          app.after(4000, app._jiggle_panel._toggle)
+          app.after(5000, app._quit)
+          app.mainloop()
+          assert not errors, 'errors during smoke test'
+          print('smoke test passed')
+          "
+
       - name: Build MacroMaker.exe
         if: steps.ver.outputs.exists == 'false'
         shell: bash
         run: |
-          pip install -r requirements.txt pyinstaller
+          pip install pyinstaller
           pyinstaller --onefile --windowed --name MacroMaker \
             --hidden-import pynput.keyboard._win32 \
             --hidden-import pynput.mouse._win32 \
+            --hidden-import pystray._win32 \
             --collect-all customtkinter \
             main.py
 
