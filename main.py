@@ -11,6 +11,8 @@ import json
 import os
 import sys
 import platform
+import threading
+import webbrowser
 import time
 
 from auto_clicker import AutoClicker
@@ -21,23 +23,47 @@ from tray import TrayIcon, icon_path
 from app_support import (SingleInstance, load_settings, save_settings,
                          setup_logging, log)
 from hotkeys import HotkeyManager, AVAILABLE_KEYS
+import autostart
+import updater
 
-# ── Windows 10 Dark Mode Theme ────────────────────────────────────────────────
-ctk.set_appearance_mode("dark")
+# ── Windows 11 theme — (light, dark) pairs; follows the system by default ────
+ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("blue")
 
-BG      = "#202020"   # window background
-NAV     = "#2B2B2B"   # sidebar / nav panel
-CARD    = "#2B2B2B"   # card / input background
-HOVER   = "#333333"   # hover state
-BORDER  = "#3A3A3A"   # separator / border
-PRIMARY = "#0078D4"   # Windows blue accent
-MUTED   = "#8A8A8A"   # secondary text
-DANGER  = "#D13438"   # stop / destructive
-FG      = "#FFFFFF"   # primary text
-ACTIVE  = "#107C10"   # running / success green
-SEG_FG  = "#CCCCCC"   # unselected tab text
-RECORD  = "#C42B1C"   # recording red
+BG      = ("#F3F3F3", "#202020")   # window background
+NAV     = ("#EBEBEB", "#2B2B2B")   # sidebar / nav panel
+CARD    = ("#FBFBFB", "#2B2B2B")   # card / input background
+HOVER   = ("#E3E3E3", "#333333")   # hover state
+BORDER  = ("#D9D9D9", "#3A3A3A")   # separator / border
+PRIMARY = "#0078D4"                # Windows blue accent
+MUTED   = ("#5F5F5F", "#8A8A8A")   # secondary text
+DANGER  = "#D13438"                # stop / destructive
+FG      = ("#1B1B1B", "#FFFFFF")   # primary text
+ACTIVE  = "#107C10"                # running / success green
+SEG_FG  = ("#333333", "#CCCCCC")   # unselected tab text
+RECORD  = "#C42B1C"                # recording red
+
+# customtkinter's blue theme uses light-grey text on every button and option
+# menu, which disappears on light cards — use our text colour instead.
+# (Accent-coloured buttons set white text explicitly.)
+for _w in ("CTkButton", "CTkOptionMenu"):
+    ctk.ThemeManager.theme[_w]["text_color"] = list(FG)
+ctk.ThemeManager.theme["CTkOptionMenu"]["fg_color"] = list(CARD)
+ctk.ThemeManager.theme["CTkOptionMenu"]["button_color"] = list(BORDER)
+
+
+def theme_tk(widget, **colors):
+    """Plain Tk widgets don't understand (light, dark) pairs — apply the right
+    one now and again whenever the theme changes."""
+    def apply(mode=None):
+        i = 0 if (mode or ctk.get_appearance_mode()) == "Light" else 1
+        try:
+            widget.configure(**{k: (v[i] if isinstance(v, tuple) else v)
+                                for k, v in colors.items()})
+        except tk.TclError:   # widget was destroyed
+            ctk.AppearanceModeTracker.remove(apply)
+    apply()
+    ctk.AppearanceModeTracker.add(apply, widget)
 
 FONT_TITLE = ("Segoe UI", 20, "bold")
 FONT_NAV   = ("Segoe UI", 13)
@@ -60,7 +86,7 @@ def _get_save_dir() -> str:
     os.makedirs(d, exist_ok=True)
     return d
 
-APP_VERSION = "1.7"
+APP_VERSION = "1.8"
 
 SAVE_DIR  = _get_save_dir()
 SAVE_FILE = os.path.join(SAVE_DIR, "macros.json")
@@ -120,8 +146,8 @@ class W10Toggle(ctk.CTkSwitch):
         super().__init__(master,
                          text="",
                          width=46,
-                         button_color=FG,
-                         button_hover_color="#E0E0E0",
+                         button_color=("#5C5C5C", "#FFFFFF"),
+                         button_hover_color=("#3D3D3D", "#E0E0E0"),
                          progress_color=PRIMARY,
                          fg_color=BORDER,
                          **kwargs)
@@ -313,7 +339,7 @@ class AutoClickerPanel(ctk.CTkScrollableFrame):
         ctrl.pack(fill="x", padx=24, pady=(4, 24))
         self._toggle_btn = ctk.CTkButton(
             ctrl, text="▶   Start", font=FONT_H, height=44,
-            fg_color=PRIMARY, hover_color="#006CBE",
+            text_color="#FFFFFF", fg_color=PRIMARY, hover_color="#006CBE",
             command=self._toggle)
         self._toggle_btn.pack(side="left", fill="x", expand=True)
         self._status = StatusBadge(ctrl)
@@ -494,7 +520,7 @@ class JigglerPanel(ctk.CTkScrollableFrame):
         ctrl.pack(fill="x", padx=24, pady=(4, 4))
         self._toggle_btn = ctk.CTkButton(
             ctrl, text="▶   Turn on", font=FONT_H, height=44,
-            fg_color=PRIMARY, hover_color="#006CBE",
+            text_color="#FFFFFF", fg_color=PRIMARY, hover_color="#006CBE",
             command=self._toggle)
         self._toggle_btn.pack(side="left", fill="x", expand=True)
         self._status = StatusBadge(ctrl)
@@ -549,6 +575,136 @@ class JigglerPanel(ctk.CTkScrollableFrame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  SETTINGS PANEL
+# ─────────────────────────────────────────────────────────────────────────────
+class SettingsPanel(ctk.CTkScrollableFrame):
+    def __init__(self, master, app, **kwargs):
+        super().__init__(master, fg_color="transparent",
+                         scrollbar_button_color=BORDER,
+                         scrollbar_button_hover_color=HOVER, **kwargs)
+        self._app = app
+        self._build_ui()
+
+    def _build_ui(self):
+        ctk.CTkLabel(self, text="Settings", font=FONT_TITLE,
+                     text_color=FG).pack(anchor="w", padx=24, pady=(20, 2))
+        ctk.CTkLabel(self, text="How Macro Maker starts, looks and updates.",
+                     font=FONT_S, text_color=MUTED).pack(anchor="w", padx=24, pady=(0, 4))
+        separator(self)
+
+        # ── STARTUP ───────────────────────────────────────────────────────────
+        section_label(self, "Startup & closing")
+        row = SettingsRow(self, "Start with Windows",
+                          "Open Macro Maker in the tray when you log in")
+        row.pack(fill="x", padx=24, pady=(0, 8))
+        self._autostart_var = tk.BooleanVar(value=autostart.is_enabled())
+        sw = W10Toggle(row, variable=self._autostart_var, command=self._on_autostart)
+        if not autostart.is_supported():
+            sw.configure(state="disabled")
+        row.add_widget(sw)
+
+        row = SettingsRow(self, "Close button hides to tray",
+                          "Off: the X button quits the app completely")
+        row.pack(fill="x", padx=24, pady=(0, 4))
+        self.close_to_tray_var = tk.BooleanVar(value=True)
+        row.add_widget(W10Toggle(row, variable=self.close_to_tray_var))
+        separator(self)
+
+        # ── APPEARANCE ────────────────────────────────────────────────────────
+        section_label(self, "Appearance")
+        row = SettingsRow(self, "Theme", "Follow Windows, or always light / dark")
+        row.pack(fill="x", padx=24, pady=(0, 4))
+        self.theme_var = tk.StringVar(value="System")
+        row.add_widget(ctk.CTkSegmentedButton(
+            row, values=["System", "Light", "Dark"], variable=self.theme_var,
+            command=lambda _v: self.apply_theme(), font=FONT_S,
+            selected_color=PRIMARY, selected_hover_color="#006CBE"))
+        separator(self)
+
+        # ── UPDATES ───────────────────────────────────────────────────────────
+        section_label(self, "Updates")
+        row = SettingsRow(self, "Check for updates on start",
+                          "Looks for a newer version on GitHub")
+        row.pack(fill="x", padx=24, pady=(0, 8))
+        self.check_updates_var = tk.BooleanVar(value=True)
+        row.add_widget(W10Toggle(row, variable=self.check_updates_var))
+
+        upd = ctk.CTkFrame(self, fg_color=CARD, corner_radius=6,
+                           border_width=1, border_color=BORDER)
+        upd.pack(fill="x", padx=24, pady=(0, 4))
+        inner = ctk.CTkFrame(upd, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        self._update_label = ctk.CTkLabel(
+            inner, text=f"Macro Maker v{APP_VERSION}", font=FONT_M,
+            text_color=FG, anchor="w", justify="left")
+        self._update_label.pack(side="left", fill="x", expand=True)
+        self._install_btn = ctk.CTkButton(
+            inner, text="Update now", width=110, height=32, font=FONT_S,
+            text_color="#FFFFFF", fg_color=PRIMARY, hover_color="#006CBE",
+            command=self._app.install_update)
+        self._check_btn = ctk.CTkButton(
+            inner, text="Check now", width=100, height=32, font=FONT_S,
+            fg_color=CARD, hover_color=HOVER, border_width=1,
+            border_color=BORDER, text_color=FG,
+            command=lambda: self._app.check_for_updates(manual=True))
+        self._check_btn.pack(side="right")
+        self._progress = ctk.CTkProgressBar(upd, height=6, progress_color=PRIMARY)
+        separator(self)
+
+        # ── ABOUT ─────────────────────────────────────────────────────────────
+        section_label(self, "About")
+        row = SettingsRow(self, f"Macro Maker v{APP_VERSION}",
+                          "Your macros, settings and error.log live in the data folder")
+        row.pack(fill="x", padx=24, pady=(0, 24))
+        links = ctk.CTkFrame(row, fg_color="transparent")
+        for text, cmd in [("📁 Data folder", lambda: os.startfile(SAVE_DIR)),
+                          ("GitHub", lambda: webbrowser.open(updater.RELEASES_PAGE))]:
+            ctk.CTkButton(links, text=text, width=100, height=30, font=FONT_S,
+                          fg_color=CARD, hover_color=HOVER, border_width=1,
+                          border_color=BORDER, text_color=FG,
+                          command=cmd).pack(side="left", padx=(6, 0))
+        row.add_widget(links)
+
+    # ── Actions ───────────────────────────────────────────────────────────────
+    def _on_autostart(self):
+        try:
+            autostart.set_enabled(self._autostart_var.get())
+        except Exception as e:
+            log.exception("Could not change start-with-Windows")
+            self._autostart_var.set(autostart.is_enabled())
+            messagebox.showerror("Macro Maker", f"Couldn't change this setting:\n{e}")
+
+    def apply_theme(self):
+        ctk.set_appearance_mode(self.theme_var.get().lower())
+
+    def show_update_state(self, text, can_install=False, busy=False, progress=None):
+        self._update_label.configure(text=text)
+        if can_install:
+            self._install_btn.pack(side="right", padx=(8, 0))
+        else:
+            self._install_btn.pack_forget()
+        state = "disabled" if busy else "normal"
+        self._check_btn.configure(state=state)
+        self._install_btn.configure(state=state)
+        if progress is None:
+            self._progress.pack_forget()
+        else:
+            self._progress.pack(fill="x", padx=12, pady=(0, 10))
+            self._progress.set(progress)
+
+    # ── Saved settings ────────────────────────────────────────────────────────
+    def persist_vars(self) -> dict:
+        return {"theme": self.theme_var, "check_updates": self.check_updates_var,
+                "close_to_tray": self.close_to_tray_var}
+
+    def after_restore(self):
+        self.apply_theme()
+
+    def cleanup(self):
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  ADD/EDIT STEP DIALOG
 # ─────────────────────────────────────────────────────────────────────────────
 class AddStepDialog(ctk.CTkToplevel):
@@ -598,7 +754,7 @@ class AddStepDialog(ctk.CTkToplevel):
         ctk.CTkButton(btn_row, text="Cancel", fg_color=CARD, hover_color=HOVER,
                       font=FONT_M, command=self.destroy).pack(
             side="left", fill="x", expand=True, padx=(0, 8))
-        ctk.CTkButton(btn_row, text="Save Step", fg_color=PRIMARY,
+        ctk.CTkButton(btn_row, text="Save Step", text_color="#FFFFFF", fg_color=PRIMARY,
                       hover_color="#006CBE", font=FONT_M,
                       command=self._save).pack(side="left", fill="x", expand=True)
 
@@ -777,7 +933,7 @@ class LoadMacroDialog(ctk.CTkToplevel):
                                        command=self._delete)
         self._del_btn.pack(side="left", padx=(8, 0))
         self._load_btn = ctk.CTkButton(btn_row, text="✔  Load Selected Macro",
-                                        font=FONT_M, fg_color=PRIMARY,
+                                        font=FONT_M, text_color="#FFFFFF", fg_color=PRIMARY,
                                         hover_color="#006CBE",
                                         state="disabled",
                                         command=self._load)
@@ -798,11 +954,11 @@ class LoadMacroDialog(ctk.CTkToplevel):
 
         self._listbox = tk.Listbox(
             left,
-            bg=CARD, fg=FG,
-            selectbackground=PRIMARY, selectforeground=FG,
+            selectbackground=PRIMARY, selectforeground="#FFFFFF",
             font=("Segoe UI", 11),
             relief="flat", bd=0, highlightthickness=0, activestyle="none",
         )
+        theme_tk(self._listbox, bg=CARD, fg=FG)
         self._listbox.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self._listbox.bind("<<ListboxSelect>>", self._on_select)
 
@@ -825,12 +981,12 @@ class LoadMacroDialog(ctk.CTkToplevel):
 
         self._preview = tk.Text(
             preview_wrap,
-            bg=CARD, fg=FG,
             font=("Courier New", 10),
             relief="flat", bd=0, highlightthickness=0,
             state="disabled", wrap="none",
             yscrollcommand=scroll.set,
         )
+        theme_tk(self._preview, bg=CARD, fg=FG)
         scroll.configure(command=self._preview.yview)
         self._preview.pack(fill="both", expand=True)
 
@@ -960,7 +1116,7 @@ class MacroPanel(ctk.CTkScrollableFrame):
             font=FONT_H,
             height=38,
             width=160,
-            fg_color=RECORD,
+            text_color="#FFFFFF", fg_color=RECORD,
             hover_color="#A32318",
             command=self._toggle_record,
         )
@@ -1008,11 +1164,11 @@ class MacroPanel(ctk.CTkScrollableFrame):
 
         self._listbox = tk.Listbox(
             list_outer,
-            bg=CARD, fg=FG,
-            selectbackground=PRIMARY, selectforeground=FG,
+            selectbackground=PRIMARY, selectforeground="#FFFFFF",
             font=("Courier New", 11),
             relief="flat", bd=0, highlightthickness=0, activestyle="none",
         )
+        theme_tk(self._listbox, bg=CARD, fg=FG)
         sb = tk.Scrollbar(list_outer, orient="vertical",
                           command=self._listbox.yview)
         self._listbox.configure(yscrollcommand=sb.set)
@@ -1153,7 +1309,7 @@ class MacroPanel(ctk.CTkScrollableFrame):
         ctrl.pack(fill="x", padx=24, pady=(0, 20))
         self._run_btn = ctk.CTkButton(
             ctrl, text="▶   Run Macro", font=FONT_H, height=44,
-            fg_color=PRIMARY, hover_color="#006CBE", command=self._toggle)
+            text_color="#FFFFFF", fg_color=PRIMARY, hover_color="#006CBE", command=self._toggle)
         self._run_btn.pack(side="left", fill="x", expand=True)
         self._status = StatusBadge(ctrl)
         self._status.pack(side="left", padx=(12, 0))
@@ -1467,10 +1623,13 @@ class MacroPanel(ctk.CTkScrollableFrame):
 #  MAIN WINDOW  — Windows 10 Settings style with left nav sidebar
 # ─────────────────────────────────────────────────────────────────────────────
 class App(ctk.CTk):
-    def __init__(self, instance: "SingleInstance | None" = None):
+    def __init__(self, instance: "SingleInstance | None" = None,
+                 start_hidden: bool = False):
         super().__init__()
         self._instance = instance
         self._error_shown = False
+        self._update_info = None      # latest release info once checked
+        self._update_notified = False
         self.title("Macro Maker")
         self.geometry("860x720")
         self.minsize(720, 560)
@@ -1497,7 +1656,7 @@ class App(ctk.CTk):
         self._tray_state = None
         self._current_tab = "Auto Clicker"
 
-        self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
+        self.protocol("WM_DELETE_WINDOW", self._on_close_button)
         self.bind("<Unmap>", self._on_unmap)
         # customtkinter sets its own window icon shortly after start-up,
         # so apply ours a moment later.
@@ -1510,6 +1669,19 @@ class App(ctk.CTk):
         if self._instance:
             self._instance.listen(lambda: self.after(0, self._show_from_tray))
 
+        if start_hidden:          # launched by "Start with Windows"
+            self.withdraw()
+            self._tray_hint_shown = True
+
+        # Housekeeping that may touch the disk/registry, off the start-up path
+        try:
+            updater.cleanup_old_exe()
+            autostart.refresh_path()
+        except Exception:
+            log.exception("Start-up housekeeping failed")
+        if self._settings_panel.check_updates_var.get():
+            self.after(3000, self.check_for_updates)
+
     def _build_ui(self):
         # ── Title bar area ────────────────────────────────────────────────────
         title_bar = ctk.CTkFrame(self, fg_color=BG, height=50, corner_radius=0)
@@ -1517,6 +1689,11 @@ class App(ctk.CTk):
         title_bar.pack_propagate(False)
         ctk.CTkLabel(title_bar, text="⚡  Macro Maker", font=("Segoe UI", 15),
                      text_color=FG).pack(side="left", padx=20, pady=14)
+        # Shown only when a newer version is available
+        self._update_btn = ctk.CTkButton(
+            title_bar, text="", height=28, font=FONT_S,
+            text_color="#FFFFFF", fg_color=PRIMARY, hover_color="#006CBE",
+            command=lambda: self._select_nav("Settings"))
 
         # ── Footer (packed BEFORE body so it is never squeezed out) ──────────
         footer = ctk.CTkFrame(self, fg_color=NAV, corner_radius=0, height=28)
@@ -1547,7 +1724,8 @@ class App(ctk.CTk):
 
         self._nav_btns: list[ctk.CTkButton] = []
 
-        for icon, label in [("🖱", "Auto Clicker"), ("⌨", "Macro Maker"), ("↔", "Mouse Jiggler")]:
+        for icon, label in [("🖱", "Auto Clicker"), ("⌨", "Macro Maker"), ("↔", "Mouse Jiggler"),
+                            ("⚙", "Settings")]:
             btn = ctk.CTkButton(
                 nav,
                 text=f"  {icon}  {label}",
@@ -1572,10 +1750,12 @@ class App(ctk.CTk):
         self._ac_panel = AutoClickerPanel(self._content, self._hk_mgr)
         self._macro_panel = MacroPanel(self._content, self._hk_mgr)
         self._jiggle_panel = JigglerPanel(self._content)
+        self._settings_panel = SettingsPanel(self._content, self)
         self._panels = {
             "Auto Clicker": self._ac_panel,
             "Macro Maker": self._macro_panel,
             "Mouse Jiggler": self._jiggle_panel,
+            "Settings": self._settings_panel,
         }
 
         self._select_nav("Auto Clicker")
@@ -1584,9 +1764,11 @@ class App(ctk.CTk):
         for btn in self._nav_btns:
             name = btn.cget("text").strip().split("  ", 1)[-1]
             if name == label:
-                btn.configure(fg_color=PRIMARY, hover_color="#006CBE")
+                btn.configure(fg_color=PRIMARY, hover_color="#006CBE",
+                              text_color="#FFFFFF")
             else:
-                btn.configure(fg_color="transparent", hover_color=HOVER)
+                btn.configure(fg_color="transparent", hover_color=HOVER,
+                              text_color=FG)
 
         for name, panel in self._panels.items():
             if name != label:
@@ -1602,10 +1784,17 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+    def _on_close_button(self):
+        if self._settings_panel.close_to_tray_var.get():
+            self._hide_to_tray()
+        else:
+            self._quit()
+
     def _on_unmap(self, event):
         # <Unmap> also fires for child widgets; only react to the window itself
         # being minimised.
-        if event.widget is self and self.state() == "iconic":
+        if (event.widget is self and self.state() == "iconic"
+                and self._settings_panel.close_to_tray_var.get()):
             self.after(0, self._hide_to_tray)
 
     def _hide_to_tray(self):
@@ -1620,6 +1809,78 @@ class App(ctk.CTk):
         self.state("normal")
         self.lift()
         self.focus_force()
+
+    # ── Updates ───────────────────────────────────────────────────────────────
+    def check_for_updates(self, manual: bool = False):
+        sp = self._settings_panel
+        sp.show_update_state("Checking for updates…", busy=True)
+
+        def work():
+            try:
+                info = updater.check_latest()
+                self.after(0, lambda: self._on_update_checked(info, manual))
+            except Exception as e:
+                log.warning("Update check failed: %s", e)
+                msg = f"Macro Maker v{APP_VERSION} — couldn't reach GitHub"
+                if manual:
+                    msg += f"\n{e}"
+                self.after(0, lambda: sp.show_update_state(msg))
+        threading.Thread(target=work, name="update-check", daemon=True).start()
+
+    def _on_update_checked(self, info: dict, manual: bool):
+        sp = self._settings_panel
+        if info["version"] and updater.is_newer(info["version"], APP_VERSION):
+            self._update_info = info
+            sp.show_update_state(
+                f"Version {info['version']} is available (you have {APP_VERSION})"
+                + (f"\n{info['notes']}" if info["notes"] else ""),
+                can_install=True)
+            self._update_btn.configure(text=f"⬆  Update to v{info['version']}")
+            self._update_btn.pack(side="right", padx=16)
+            if not self._update_notified:
+                self._update_notified = True
+                self._tray.notify(f"Version {info['version']} is available — "
+                                  "open Settings to update.")
+        else:
+            self._update_info = None
+            self._update_btn.pack_forget()
+            sp.show_update_state(f"You're up to date (v{APP_VERSION})")
+
+    def install_update(self):
+        info = self._update_info
+        if not info:
+            return
+        if not updater.can_self_update() or not info.get("url"):
+            webbrowser.open(updater.RELEASES_PAGE)
+            return
+        if not messagebox.askyesno(
+                "Update Macro Maker",
+                f"Download version {info['version']} and restart Macro Maker now?\n\n"
+                "Anything running (auto clicker, macro, jiggler) will stop."):
+            return
+        sp = self._settings_panel
+
+        def progress(frac):
+            self.after(0, lambda: sp.show_update_state(
+                f"Downloading v{info['version']}… {int(frac * 100)}%",
+                busy=True, progress=frac))
+
+        def work():
+            try:
+                exe = updater.download_and_install(info["url"], progress)
+                log.info("Updated to v%s, restarting", info["version"])
+                self.after(0, lambda: self._restart_into(exe))
+            except Exception as e:
+                log.exception("Update failed")
+                err = str(e)
+                self.after(0, lambda: (
+                    sp.show_update_state(f"Update failed: {err}", can_install=True),
+                    messagebox.showerror("Macro Maker", f"Update failed:\n{err}")))
+        sp.show_update_state(f"Downloading v{info['version']}…", busy=True, progress=0)
+        threading.Thread(target=work, name="update-install", daemon=True).start()
+
+    def _restart_into(self, exe: str):
+        self._quit(before_destroy=lambda: updater.launch_new(exe))
 
     def _tick(self):
         # Once a second: refresh the tray (hotkeys toggle things from other
@@ -1673,10 +1934,15 @@ class App(ctk.CTk):
                 f"Something went wrong: {exc}\n\n"
                 f"Details were saved to:\n{LOG_FILE}")
 
-    def _quit(self):
+    def _quit(self, before_destroy=None):
         self._save_settings_if_changed()
         if self._instance:
             self._instance.close()
+        if before_destroy:
+            try:
+                before_destroy()
+            except Exception:
+                log.exception("Could not start the new version")
         log.info("Macro Maker closed")
         self._tray.stop()
         self._ac_panel.cleanup()
@@ -1698,9 +1964,17 @@ if __name__ == "__main__":
             pass
     setup_logging(LOG_FILE, APP_VERSION)
     instance = SingleInstance()
+    if "--after-update" in sys.argv:
+        # The old version may still be closing; wait for it to let go.
+        for _ in range(30):
+            if instance.is_primary:
+                break
+            instance.close()
+            time.sleep(0.5)
+            instance = SingleInstance()
     if not instance.is_primary:
         # Already running (probably hidden in the tray): bring it forward.
         instance.notify_primary()
         sys.exit(0)
-    app = App(instance)
+    app = App(instance, start_hidden="--tray" in sys.argv)
     app.mainloop()

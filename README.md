@@ -52,6 +52,13 @@ Double-click `build_exe.bat`. The result lands in `dist\MacroMaker.exe`.
 - **Left-click** the tray icon to bring the window back
 - **Right-click** for a menu: open, turn the Auto Clicker / Mouse Jiggler on or off, or **Quit**
 
+### Settings page
+- **Start with Windows** — opens quietly in the tray when you log in
+- **Close button hides to tray** — turn off if you'd rather the X quits
+- **Theme** — follow Windows, or always Light / Dark (Windows 11 colours)
+- **Automatic updates** — checks GitHub on start; when a new version is out a button appears in the title bar and **Update now** downloads it and restarts the app in place (your taskbar pin keeps working)
+- Quick links to the data folder (macros, settings, error log) and GitHub
+
 ### Quality of life
 - **Remembers your settings** (intervals, hotkeys, repeat options, last open page…) in `%APPDATA%\MacroMaker\settings.json`
 - **Only one copy runs at a time** — launching it again just brings the existing window back from the tray
@@ -74,6 +81,7 @@ All hotkeys are configurable from the app UI.
 
 ## Changelog
 
+- **1.8** — Settings page: start with Windows, light/dark theme, close-to-tray option, automatic updates
 - **1.7** — Wait between repeats, playback speed & timing variation, remembers settings, single instance, error log
 - **1.6** — Same ⚡ icon for the .exe, window, taskbar (also when pinned) and tray
 - **1.5** — Runs in the system tray when closed or minimised

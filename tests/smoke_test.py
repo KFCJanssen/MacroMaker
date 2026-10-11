@@ -47,7 +47,13 @@ run_app(lambda app: [
     (4200, lambda: app._macro_panel._gap_var.set("2.5")),
     (4200, lambda: app._macro_panel._speed_var.set("2×")),
     (4200, lambda: app._select_nav("Mouse Jiggler")),
-    (6000, app._quit),
+    (4400, lambda: (app._settings_panel.theme_var.set("Light"),
+                    app._settings_panel.apply_theme())),
+    (4800, lambda: app._select_nav("Settings")),
+    (5200, lambda: (app._settings_panel.theme_var.set("Dark"),
+                    app._settings_panel.apply_theme())),
+    (5400, lambda: app._select_nav("Mouse Jiggler")),
+    (7000, app._quit),
 ])
 assert os.path.exists(main.SETTINGS_FILE), "settings.json was not written"
 
@@ -58,12 +64,21 @@ run_app(lambda app: [
         interval=app._ac_panel._interval_var.get(),
         gap=app._macro_panel._gap_var.get(),
         speed=app._macro_panel._speed_var.get(),
-        tab=app._current_tab)),
+        tab=app._current_tab,
+        theme=app._settings_panel.theme_var.get())),
     (1500, app._quit),
 ])
-assert seen == {"interval": "1234", "gap": "2.5", "speed": "2×", "tab": "Mouse Jiggler"}, seen
+assert seen == {"interval": "1234", "gap": "2.5", "speed": "2×",
+                "tab": "Mouse Jiggler", "theme": "Dark"}, seen
 
-# 4) a second copy hands over to the first and exits
+# 4) --tray starts hidden
+hidden = {}
+app = main.App(start_hidden=True)
+app.after(1500, lambda: (hidden.update(state=app.state()), app._quit()))
+app.mainloop()
+assert hidden["state"] == "withdrawn", hidden
+
+# 5) a second copy hands over to the first and exits
 first = subprocess.Popen([sys.executable, "main.py"])
 time.sleep(6)
 second = subprocess.run([sys.executable, "main.py"], timeout=30)

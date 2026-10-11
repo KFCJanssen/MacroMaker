@@ -108,7 +108,15 @@ class SingleInstance:
                 if self._k32.WaitForSingleObject(self._handle, 500) == WAIT_OBJECT_0:
                     if not self._stop.is_set():
                         on_show()
-        threading.Thread(target=run, name="single-instance", daemon=True).start()
+        self._thread = threading.Thread(target=run, name="single-instance", daemon=True)
+        self._thread.start()
 
     def close(self):
+        """Stop listening and release the event so a new copy can take over."""
         self._stop.set()
+        t = getattr(self, "_thread", None)
+        if t is not None:
+            t.join(timeout=1.5)
+        if self._handle:
+            self._k32.CloseHandle(self._handle)
+            self._handle = None

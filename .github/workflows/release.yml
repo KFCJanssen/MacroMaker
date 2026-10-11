@@ -36,9 +36,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Smoke test (start, tray, settings, single instance)
+      - name: Smoke test (app, tray, settings, theme, single instance)
         if: steps.ver.outputs.exists == 'false'
-        timeout-minutes: 5
+        timeout-minutes: 8
         shell: bash
         run: |
           pip install -r requirements.txt
@@ -56,6 +56,12 @@ jobs:
             --hidden-import pystray._win32 \
             --collect-all customtkinter \
             main.py
+
+      - name: Self-update test (running old version -> new build)
+        if: steps.ver.outputs.exists == 'false'
+        timeout-minutes: 5
+        shell: bash
+        run: python tests/update_test.py
 
       - name: Publish release
         if: steps.ver.outputs.exists == 'false'
